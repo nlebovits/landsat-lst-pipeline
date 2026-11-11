@@ -11,7 +11,6 @@ $btn-border-radius: 0;
 $btn-border-radius-lg: 0;
 $btn-border-radius-sm: 0;
 $card-border-radius: 0;
-$navbar-padding-y: 0.6rem;
 $font-size-root: 17px;
 $h1-font-size: 2.25rem;
 $h2-font-size: 1.55rem;
@@ -44,24 +43,9 @@ body {
   border-image: $lst-magma 1;
 }
 
-.navbar {
-  border-bottom: 1px solid var(--lst-line);
-  box-shadow: none;
-}
-
-.navbar-brand .navbar-title {
+.sidebar-title {
   font-weight: 600;
   letter-spacing: -0.01em;
-}
-
-.navbar .nav-link {
-  font-weight: 500;
-}
-
-#title-block-header .description {
-  margin-top: 0.6rem;
-  font-size: 1.1rem;
-  color: var(--lst-mute);
 }
 
 h1,

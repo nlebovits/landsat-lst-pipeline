@@ -50,13 +50,13 @@ ROOT = Path(__file__).resolve().parent.parent
 #: because a copy that has drifted from its source is itself the failure this
 #: catches.
 #:
-#: The quickstart page includes that section and adds a block of its own. Its
-#: source holds only the added block, because Quarto resolves the include when
-#: it renders the site. The page uses a plain ```python fence, which Quarto
-#: shows as code and never executes at build time.
+#: The quickstart page includes that section through Quarto and is not listed.
+#: Its own code is executable ```{python} cells, which Quarto runs when it
+#: renders the page. The docs workflow renders the page from an empty freeze
+#: on every pull request that changes it, and a cell that raises fails that
+#: job. Running those cells here as well would test them twice.
 DOCUMENTS = (
     "docs/_readme/storage-and-access.md",
-    "docs/quickstart.qmd",
     "catalog/README.md",
     "catalog/AGENTS.md",
     "catalog/lst-p95-2021-2025/README.md",
@@ -81,27 +81,7 @@ HOTTEST_C = 100.0
 #: What each documented block has to produce, keyed by a substring that
 #: identifies it. A block matching no key fails `test_every_block_is_checked`,
 #: which is what stops a new example shipping unexecuted.
-#:
-#: `assertion_for` takes the first key that matches. The quickstart block
-#: imports `rasterio.windows` too, so its own key has to come first.
 ASSERTIONS: dict[str, str] = {
-    "reliable_lst": """
-import numpy.ma as ma
-assert monthly_counts.shape == (12, *lst_celsius.shape), monthly_counts.shape
-assert isinstance(reliable_lst, ma.MaskedArray), type(reliable_lst)
-hidden = ma.getmaskarray(reliable_lst)
-# The threshold only adds to the mask. Every pixel it keeps has the
-# observations the block asked for and a temperature the COG published.
-assert (hidden >= ma.getmaskarray(lst_celsius)).all()
-assert (total_counts[~hidden] >= MIN_OBSERVATIONS).all()
-assert hidden[total_counts < MIN_OBSERVATIONS].all()
-values = reliable_lst.compressed()
-assert values.size > 0, "the documented threshold masked the whole window"
-assert {coldest} <= values.min(), values.min()
-assert values.max() <= {hottest}, values.max()
-print("OK", values.size, int(hidden.sum()), int(total_counts.min()),
-      int(total_counts.max()))
-""",
     "rasterio.windows": """
 import numpy.ma as ma
 assert isinstance(lst_celsius, ma.MaskedArray), type(lst_celsius)
@@ -238,8 +218,8 @@ def test_the_documented_block_runs(relative, index, block, tmp_path):
     stderr is not asserted on. Both readers emit shutdown-time noise from
     GDAL that says nothing about whether the example worked.
 
-    The appended assertion prints the last line. The quickstart block prints
-    a line of its own first, for the reader, so only the last line is checked.
+    The appended assertion prints the last line, and only that line is
+    checked. A block may print lines of its own first, for the reader.
     """
     script = tmp_path / f"block_{index}.py"
     script.write_text(block + assertion_for(block), encoding="utf-8")

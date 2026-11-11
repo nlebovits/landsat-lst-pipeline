@@ -109,20 +109,12 @@ Land surface temperature is best understood in the context of ancillary data on 
 - **Tree canopy height** from [World Resources Institute and Meta](https://source.coop/tge-labs/meta-chm-v2).
 - [ASTER **Global Water Bodies** Database](https://data.nasa.gov/dataset/aster-global-water-bodies-database-v001-7ff0b) from NASA.
 
-### Example notebook
-
-A notebook for this data product is planned. In the meantime, [this cookbook on Pergamino, Argentina](https://nlebovits.github.io/datos-escala-humana/en/en/cookbooks/pergamino.html) shows the approach we encourage: pulling in ancillary datasets such as global tree canopy cover and building heights, and assessing them holistically with an eye toward concrete planning interventions.
-
-## Development
-
-See [`AGENTS.md`](https://github.com/nlebovits/landsat-lst-smoke/blob/main/AGENTS.md).
-
 ## Provenance
 
 The USGS produces the Landsat Collection 2 Level-2 surface temperature scenes that these composites read, and distributes them through [LandsatLook](https://landsatlook.usgs.gov/stac-server). The compositing is ours: every numeric rule, and every run that wrote a tile, lives in [landsat-lst-smoke](https://github.com/nlebovits/landsat-lst-smoke). [Source Cooperative](https://source.coop/) hosts the published result. Each item's `processing:lineage` records the rules that produced its pixels and names every input artifact by checksum, so a tile can be traced back to the scenes and the ancillary rasters it was built from.
 
 ## License
 
-This codebase carries an [Apache 2.0](https://github.com/nlebovits/landsat-lst-smoke/blob/main/LICENSE) license. The data themselves are available under `CC0-1.0`, based on USGS terms for Landsat Collection 2 products.
+This codebase carries an [Apache 2.0](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/LICENSE) license. The data themselves are available under `CC0-1.0`, based on USGS terms for Landsat Collection 2 products.
 
 <!-- vale on -->

@@ -56,6 +56,13 @@ TILE = "S30W065"
 #: What a clone carries that the project needs to build and resolve.
 CHECKOUT_FILES = ("pyproject.toml", "uv.lock", "README.md")
 
+#: Directories a clone carries that the package reads at run time.
+#:
+#: `cog_catalog.published_readme` builds both catalog READMEs from the sections
+#: under `docs/_readme/`. A checkout without them can build the package and
+#: then fail at the end of a tile, when the run writes its catalog.
+CHECKOUT_TREES = ("docs/_readme",)
+
 #: The subprocess allows 900 s and pytest-timeout has to allow at least as
 #: much, or the CLI timeout is unreachable and a slow resolve reads as a
 #: dependency failure.
@@ -89,6 +96,8 @@ def fresh_checkout(tmp_path, *, with_mask=False):
     shutil.copytree(ROOT / "src", work / "src")
     for name in CHECKOUT_FILES:
         shutil.copy2(ROOT / name, work / name)
+    for tree in CHECKOUT_TREES:
+        shutil.copytree(ROOT / tree, work / tree)
     shutil.copy2(SLICE, work / "artifacts" / SLICE.name)
 
     # The flag the instance uses, at `fleet/run.sh:25`. A failure here is the

@@ -1,0 +1,64 @@
+# Brand for the docs site. It matches the web map
+# (https://sensable-heat.vercel.app/): IBM Plex Sans and IBM Plex Mono on
+# neutral greys, with accents taken from matplotlib's magma ramp, the ramp the
+# published thumbnail uses.
+#
+# Palette entries cannot carry light and dark variants; semantic colors can.
+# Quarto picks the variant for each half of `theme: {light, dark}` in
+# _quarto.yml. styles.scss, light.scss and dark.scss hold everything a brand
+# file cannot express.
+meta:
+  name: Landsat LST P95
+  link:
+    home: https://nlebovits.github.io/landsat-lst-pipeline/
+    github: https://github.com/nlebovits/landsat-lst-pipeline
+
+color:
+  palette:
+    # magma(t) samples, dark to light.
+    magma-0: "#000004"
+    magma-1: "#3b0f70"
+    magma-2: "#8c2981"
+    magma-3: "#b73779"
+    magma-4: "#de4968"
+    magma-5: "#fc8961"
+    magma-6: "#fcfdbf"
+    ink: "#0c0e11"
+    paper: "#fafaf9"
+    night: "#131417"
+    chalk: "#e7e7e4"
+  foreground:
+    light: ink
+    dark: chalk
+  background:
+    light: paper
+    dark: night
+  primary:
+    light: "#a52f6c"
+    dark: magma-5
+  secondary:
+    light: "#5e5e5a"
+    dark: "#a3a39e"
+
+typography:
+  fonts:
+    - family: IBM Plex Sans
+      source: google
+      weight: [400, 500, 600]
+      style: [normal, italic]
+    - family: IBM Plex Mono
+      source: google
+      weight: [400, 500]
+  base:
+    family: IBM Plex Sans
+    size: 17px
+    line-height: 1.6
+  headings:
+    family: IBM Plex Sans
+    weight: 600
+    line-height: 1.25
+  monospace:
+    family: IBM Plex Mono
+    size: 0.9em
+  link:
+    decoration: underline

@@ -1,0 +1,6 @@
+---
+title: Intended use
+description: What the composite supports, and the ancillary data to read it alongside.
+---
+
+{{< include /_readme/intended-use.md >}}

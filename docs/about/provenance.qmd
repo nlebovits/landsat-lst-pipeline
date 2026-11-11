@@ -1,0 +1,8 @@
+---
+title: Provenance and license
+description: The source scenes, the processing record in each item, and the terms of reuse.
+---
+
+{{< include /_readme/provenance.md >}}
+
+{{< include /_readme/license.md >}}

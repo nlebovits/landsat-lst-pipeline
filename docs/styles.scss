@@ -1,0 +1,404 @@
+// Shared rules for both color schemes. _brand.yml sets the fonts and the
+// semantic colors; light.scss and dark.scss set the --lst-* custom properties
+// these rules read. Square corners and hairlines follow the web
+// map, and the magma ramp is the one accent that repeats.
+
+/*-- scss:defaults --*/
+$border-radius: 0;
+$border-radius-sm: 0;
+$border-radius-lg: 0;
+$btn-border-radius: 0;
+$btn-border-radius-lg: 0;
+$btn-border-radius-sm: 0;
+$card-border-radius: 0;
+$navbar-padding-y: 0.6rem;
+$font-size-root: 17px;
+$h1-font-size: 2.25rem;
+$h2-font-size: 1.55rem;
+$h3-font-size: 1.2rem;
+$h4-font-size: 1.05rem;
+$headings-margin-bottom: 0.6rem;
+$toc-font-size: 0.85rem;
+
+/*-- scss:rules --*/
+
+// The magma ramp, sampled at the same stops as the palette in _brand.yml.
+$lst-magma: linear-gradient(
+  90deg,
+  #000004 0%,
+  #3b0f70 18%,
+  #8c2981 36%,
+  #de4968 58%,
+  #fe9f6d 80%,
+  #fcfdbf 100%
+);
+
+body {
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+// One stripe of the ramp across the top of every page.
+#quarto-header {
+  border-top: 3px solid transparent;
+  border-image: $lst-magma 1;
+}
+
+.navbar {
+  border-bottom: 1px solid var(--lst-line);
+  box-shadow: none;
+}
+
+.navbar-brand .navbar-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.navbar .nav-link {
+  font-weight: 500;
+}
+
+#title-block-header .description {
+  margin-top: 0.6rem;
+  font-size: 1.1rem;
+  color: var(--lst-mute);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.012em;
+}
+
+h2 {
+  margin-top: 2.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--lst-line);
+}
+
+h3 {
+  margin-top: 1.8rem;
+}
+
+main a:not(.btn):not(.nav-link) {
+  overflow-wrap: anywhere;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+
+main a:not(.btn):not(.nav-link):hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--lst-focus);
+  outline-offset: 2px;
+}
+
+code {
+  font-size: 0.88em;
+}
+
+:not(pre) > code:not(.sourceCode) {
+  padding: 0.08em 0.3em;
+  background: var(--lst-surface-2);
+  color: var(--lst-fg);
+}
+
+div.sourceCode,
+pre.sourceCode {
+  border: 1px solid var(--lst-line);
+  background: var(--lst-surface-2);
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+.table > :not(caption) > * > * {
+  padding: 0.45rem 0.6rem;
+}
+
+.callout {
+  border-radius: 0;
+}
+
+.btn {
+  font-weight: 500;
+  padding: 0.6rem 1.1rem;
+  text-decoration: none;
+}
+
+.btn-primary {
+  color: var(--lst-on-primary);
+}
+
+.btn-outline {
+  border: 1px solid var(--lst-line-strong);
+  color: var(--lst-fg);
+  background: transparent;
+}
+
+.btn-outline:hover,
+.btn-outline:focus-visible {
+  border-color: var(--lst-fg);
+  color: var(--lst-fg);
+  background: var(--lst-surface-2);
+}
+
+.nav-footer {
+  border-top: 1px solid var(--lst-line);
+  font-size: 0.85rem;
+}
+
+.nav-footer a {
+  text-underline-offset: 0.18em;
+}
+
+// -------------------------------------------------------------------------
+// Landing page
+// -------------------------------------------------------------------------
+
+.lst-landing {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+// The hero heading names the page, so the generated title block would only
+// repeat the site name above it.
+.lst-home #title-block-header {
+  display: none;
+}
+
+// Running text keeps a readable measure inside the wide landing layout.
+.lst-landing section > p,
+.lst-landing .lst-data,
+.lst-listen-text {
+  max-width: 46rem;
+}
+
+.lst-landing > h2,
+.lst-landing .lst-section > h2 {
+  margin-top: 3.2rem;
+}
+
+.lst-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: center;
+  padding: 1.5rem 0 1rem;
+}
+
+@media (min-width: 992px) {
+  .lst-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 3rem;
+    padding: 3rem 0 2rem;
+  }
+}
+
+.lst-hero h1 {
+  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.1rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 0 0 1rem;
+}
+
+.lst-hero .lst-lede {
+  font-size: 1.12rem;
+  color: var(--lst-mute);
+  max-width: 34rem;
+}
+
+.lst-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
+
+.lst-actions p {
+  display: contents;
+}
+
+@media (max-width: 575.98px) {
+  .lst-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
+.lst-hero-figure {
+  margin: 0;
+}
+
+.lst-hero-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: auto;
+}
+
+// The legend under the hero map. The ramp is relative, so the labels name
+// the direction and not a temperature.
+.lst-ramp {
+  height: 8px;
+  margin-top: 0.75rem;
+  background: $lst-magma;
+}
+
+.lst-ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--lst-mute);
+}
+
+.lst-ramp-labels p {
+  margin: 0;
+}
+
+// Linked summaries of the About pages. A grid of plain blocks with a
+// hairline and no shadow; the hover state darkens the rule.
+.lst-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: 0;
+  margin: 0.5rem 0 0;
+}
+
+.lst-link {
+  position: relative;
+  padding: 1rem 1rem 1.1rem 0;
+  border-bottom: 1px solid var(--lst-line);
+}
+
+.lst-link h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.3rem;
+}
+
+.lst-link h3 a {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+// The heading link covers the whole block, so the block is one target.
+.lst-link h3 a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.lst-link p {
+  margin: 0;
+  color: var(--lst-mute);
+  font-size: 0.95rem;
+}
+
+.lst-link:hover h3 a {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.lst-listen {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem 2rem;
+  margin-top: 3.2rem;
+  padding: 1.5rem;
+  background: var(--lst-surface-2);
+  border-left: 3px solid var(--bs-primary);
+}
+
+@media (min-width: 768px) {
+  .lst-listen {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}
+
+.lst-listen h2 {
+  margin: 0 0 0.4rem;
+  padding: 0;
+  border: 0;
+  font-size: 1.25rem;
+}
+
+.lst-listen p {
+  margin: 0;
+}
+
+.lst-listen .lst-listen-meta {
+  color: var(--lst-mute);
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+}
+
+.lst-data {
+  margin: 1.25rem 0 0;
+}
+
+.lst-data dt {
+  font-weight: 600;
+  margin-top: 0.9rem;
+}
+
+.lst-data dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+// -------------------------------------------------------------------------
+// Examples gallery
+// -------------------------------------------------------------------------
+
+.lst-empty {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border: 1px dashed var(--lst-line-strong);
+}
+
+.lst-empty h2 {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  font-size: 1.2rem;
+}
+
+.lst-empty p:last-child {
+  margin-bottom: 0;
+}
+
+// The empty-state block stays hidden once the listing holds an item.
+.quarto-listing:has(.quarto-grid-item) ~ .lst-empty,
+#listing-examples:has(.quarto-grid-item) ~ .lst-empty {
+  display: none;
+}
+
+// With no items, the filter box has nothing to filter.
+.quarto-listing:not(:has(.quarto-grid-item)) .listing-actions-group {
+  display: none;
+}
+
+.quarto-grid-item.card {
+  border: 1px solid var(--lst-line);
+  box-shadow: none;
+}
+
+.quarto-grid-item.card:hover {
+  border-color: var(--lst-line-strong);
+}
+
+.quarto-grid-item .listing-categories .listing-category {
+  border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

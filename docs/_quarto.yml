@@ -1,0 +1,142 @@
+# The docs site. Render it from the repository root:
+#
+#     uv sync --group docs
+#     uv run --group docs quarto render docs
+#     uv run --group docs quarto preview docs
+#
+# `.github/workflows/docs.yml` renders it on every pull request and publishes
+# `_site/` to GitHub Pages from `main`.
+project:
+  type: website
+  output-dir: _site
+  # An explicit list, because `docs/` also holds PROSE.md and conformance.md.
+  # Both are repository documents rather than site pages, and a default render
+  # would publish them. Globs rather than names where a directory fills up
+  # over time: a glob that matches nothing renders nothing.
+  render:
+    - index.qmd
+    - quickstart.qmd
+    - about/*.qmd
+    - tutorials/*.qmd
+    - examples/index.qmd
+    - examples/*/index.qmd
+    - contribute/*.qmd
+  resources:
+    - images/favicon.svg
+    - images/thumbnail.png
+
+# Notebook pages run their cells once and reuse the stored outputs until the
+# source changes. Commit `docs/_freeze/` with the page that produced it: the
+# docs workflow renders without executing and fails when the freeze is stale.
+execute:
+  freeze: auto
+  echo: true
+  warning: false
+
+website:
+  title: Landsat LST P95
+  description: >-
+    Global 30 m 95th-percentile land surface temperature composites from
+    Landsat 8 and 9, 2021 to 2025, as cloud-optimized GeoTIFFs on Source
+    Cooperative.
+  site-url: https://nlebovits.github.io/landsat-lst-pipeline/
+  repo-url: https://github.com/nlebovits/landsat-lst-pipeline
+  repo-subdir: docs
+  repo-branch: main
+  repo-actions: [edit, source, issue]
+  favicon: images/favicon.svg
+  image: images/thumbnail.png
+  open-graph:
+    image: images/thumbnail.png
+    image-alt: >-
+      World map of 95th-percentile land surface temperature, in the magma
+      color ramp.
+  twitter-card:
+    card-style: summary_large_image
+    image: images/thumbnail.png
+  search:
+    location: navbar
+    type: overlay
+  page-navigation: true
+  back-to-top-navigation: true
+  bread-crumbs: false
+
+  navbar:
+    title: Landsat LST P95
+    collapse-below: lg
+    left:
+      - text: Home
+        href: index.qmd
+      - text: Quickstart
+        href: quickstart.qmd
+      - text: Tutorial
+        href: tutorials/pergamino.qmd
+      - text: Examples
+        href: examples/index.qmd
+      - text: About
+        menu:
+          - text: Philosophy
+            href: about/philosophy.qmd
+          - text: Methods
+            href: about/methods.qmd
+          - text: Known issues
+            href: about/known-issues.qmd
+          - text: Intended use
+            href: about/intended-use.qmd
+          - text: Provenance and license
+            href: about/provenance.qmd
+      - text: Contribute
+        menu:
+          - text: Contributing
+            href: contribute/index.qmd
+          - text: Contribute a notebook
+            href: contribute/notebooks.qmd
+          - text: Code of conduct
+            href: contribute/code-of-conduct.qmd
+          - text: Changelog
+            href: contribute/changelog.qmd
+    right:
+      - text: Web map
+        icon: map
+        href: https://sensable-heat.vercel.app/
+      - text: Dataset
+        icon: database
+        href: https://source.coop/nlebovits/landsat-lst
+        aria-label: Dataset on Source Cooperative
+      - icon: github
+        href: https://github.com/nlebovits/landsat-lst-pipeline
+        aria-label: Source code on GitHub
+
+  page-footer:
+    left:
+      - text: Dataset on Source Cooperative
+        href: https://source.coop/nlebovits/landsat-lst
+      - text: Web map
+        href: https://sensable-heat.vercel.app/
+      - text: Source code
+        href: https://github.com/nlebovits/landsat-lst-pipeline
+    right: >-
+      Docs [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) ·
+      Code [Apache-2.0](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/LICENSE) ·
+      Data [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+
+format:
+  html:
+    theme:
+      light: [brand, styles.scss, light.scss]
+      dark: [brand, styles.scss, dark.scss]
+    respect-user-color-scheme: true
+    toc: true
+    toc-depth: 3
+    toc-title: On this page
+    code-fold: true
+    code-summary: Show the code
+    code-tools: true
+    code-copy: true
+    code-overflow: wrap
+    link-external-icon: false
+    link-external-newwindow: false
+    anchor-sections: true
+    smooth-scroll: false
+    fig-responsive: true
+    lang: en

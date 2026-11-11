@@ -1,0 +1,103 @@
+---
+title: "Quickstart"
+description: "Read a window of the Landsat LST P95 composite in Python, then hide the pixels that too few observations support."
+---
+
+This page shows you how to read the composite from Python. You open one tile
+through its [STAC](https://stacspec.org/) item and read a small window of
+temperatures. Then you check how many observations support each pixel.
+
+Each tile is an item in a
+[Portolan catalog](https://data.source.coop/nlebovits/landsat-lst/catalog.json)
+that [Source Cooperative](https://source.coop/nlebovits/landsat-lst) hosts. To
+look at the data before you write code, open the
+[web map](https://sensable-heat.vercel.app/).
+
+### Before you begin
+
+Install [pystac](https://pystac.readthedocs.io/),
+[rasterio](https://rasterio.readthedocs.io/), and [NumPy](https://numpy.org/):
+
+```bash
+python -m pip install pystac rasterio numpy
+```
+
+The examples read public files over HTTPS. You need no account and no
+credentials.
+
+{{< include /_readme/storage-and-access.md >}}
+
+### Hide pixels with few observations
+
+Each item also carries a `qa_count` asset. It holds 12 bands, one for each
+calendar month from January through December. Each band counts the
+observations of a pixel that passed quality masking in that month. The asset
+has no nodata value. A zero means that no observation from that month passed.
+
+The composite withholds a value from any pixel with fewer than five valid
+observations across 2021–2025. Near that minimum, one unusual scene can shift
+the P95 value. The [methods page](/about/methods.qmd) describes the rule.
+
+The code below reads `qa_count` for the same window as the preceding example. It
+sums the 12 bands into a total for each pixel. Then it hides every temperature
+that fewer than 20 observations support.
+
+```python
+import numpy as np
+import pystac
+import rasterio
+from rasterio.windows import from_bounds
+
+item = pystac.Item.from_file(
+    "https://data.source.coop/nlebovits/landsat-lst/"
+    "lst-p95-2021-2025/S30W065/S30W065.json"
+)
+bounds = (-64, -34, -63.9, -33.9)
+
+with rasterio.open(item.assets["lst_p95"].get_absolute_href()) as src:
+    window = from_bounds(*bounds, src.transform)
+    lst = src.read(1, window=window, masked=True)
+    lst_celsius = lst * src.scales[0] + src.offsets[0]
+
+with rasterio.open(item.assets["qa_count"].get_absolute_href()) as src:
+    window = from_bounds(*bounds, src.transform)
+    # One band per calendar month, January through December.
+    monthly_counts = src.read(window=window)
+
+# Valid observations per pixel across all five years.
+total_counts = monthly_counts.sum(axis=0)
+
+MIN_OBSERVATIONS = 20
+reliable_lst = np.ma.masked_where(total_counts < MIN_OBSERVATIONS, lst_celsius)
+print(f"Hidden: {reliable_lst.mask.sum()} of {reliable_lst.size} pixels")
+```
+
+`reliable_lst` is a NumPy
+[masked array](https://numpy.org/doc/stable/reference/maskedarray.html). It
+hides the pixels that the COG marks as nodata and the pixels below your
+threshold. Both COGs in an item share one grid. The same bounds select the
+same pixels from each.
+
+This window lies in the Argentine Pampas. Every pixel in it has more than 300
+valid observations, and the threshold hides none of them. Try a window over a
+persistently cloudy region to see the mask take effect. The
+[known issues](/about/known-issues.qmd) page describes where cloud cover and
+ASTER gaps limit the record.
+
+Choose a threshold that matches how much noise your decision can tolerate, and
+report it with your results.
+
+### Next steps
+
+- Follow the [Pergamino tutorial](/tutorials/pergamino.qmd). It combines the
+  composite with tree canopy and building data for one city.
+- Read the [methods](/about/methods.qmd) to learn how scene normalization and
+  feathering change the values.
+- Check the [intended use](/about/intended-use.qmd) before you base a decision
+  on the data.
+- Read the [philosophy](/about/philosophy.qmd) behind a fit-for-purpose
+  dataset.
+- List every tile from the
+  [item mirror](https://data.source.coop/nlebovits/landsat-lst/lst-p95-2021-2025/items.parquet),
+  or browse the
+  [STAC collection](https://data.source.coop/nlebovits/landsat-lst/lst-p95-2021-2025/collection.json).

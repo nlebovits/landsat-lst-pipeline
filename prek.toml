@@ -219,6 +219,32 @@ hooks = [
     pass_filenames = false,
   },
 
+  # Docs notebook inputs. `freeze: auto` watches only a notebook's own source.
+  # This compares its other inputs, docs/_plotting.py, docs/fonts/, and the
+  # files in its directory, with the hashes in docs/_notebook_inputs.json.
+  # The docs workflow runs the same check.
+  {
+    id = "docs-notebook-inputs",
+    name = "docs notebook inputs match their freeze",
+    entry = "python3 .github/scripts/docs_notebooks.py check",
+    language = "system",
+    files = "^(docs/|\\.github/scripts/docs_notebooks\\.py$)",
+    pass_filenames = false,
+  },
+
+  # Action references. GitHub resolves `uses: owner/repo@ref` only when a job
+  # starts, so a ref that names nothing passes every other check. On pre-push
+  # because it asks github.com for each repository's refs.
+  {
+    id = "action-refs",
+    name = "workflow action references resolve",
+    entry = "python3 .github/scripts/check_action_refs.py",
+    language = "system",
+    files = "^\\.github/(workflows/.*\\.ya?ml|scripts/check_action_refs\\.py)$",
+    pass_filenames = false,
+    stages = ["pre-push"],
+  },
+
   # Unit tests on pre-push. They assert the figures FINDINGS.md publishes.
   # They take minutes, not the seconds this comment once claimed, because
   # several of them drive a real frisky cluster. `addopts` in pyproject.toml

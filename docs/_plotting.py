@@ -85,6 +85,14 @@ DPI = 110
 ESRI_IMAGERY = cx.providers.Esri.WorldImagery
 IMAGERY_CREDIT = "Imagery: Esri, Maxar, Earthstar Geographics"
 
+# Esri's tile server sometimes answers a burst of requests with 502 Bad
+# Gateway. contextily retries a failed tile `max_retries` times, `wait`
+# seconds apart; its defaults of 2 retries and no wait failed the docs
+# workflow on 2026-11-11. Eight retries five seconds apart ride out about
+# 40 seconds of errors per tile.
+TILE_RETRIES = 8
+TILE_RETRY_WAIT_S = 5
+
 METRES_PER_DEGREE = 111_320.0
 
 
@@ -208,7 +216,15 @@ def basemap(
     miny, maxy = ax.get_ylim()
     geographic = crs == "EPSG:4326"
     img, extent = cx.bounds2img(
-        minx, miny, maxx, maxy, zoom=zoom, source=ESRI_IMAGERY, ll=geographic
+        minx,
+        miny,
+        maxx,
+        maxy,
+        zoom=zoom,
+        source=ESRI_IMAGERY,
+        ll=geographic,
+        wait=TILE_RETRY_WAIT_S,
+        max_retries=TILE_RETRIES,
     )
     if crs != "EPSG:3857":
         img, extent = cx.warp_tiles(img, extent, t_crs=crs)

@@ -28,6 +28,25 @@ across a city or region, especially where no other heat data exists.
   and its [STAC catalog](https://data.source.coop/nlebovits/landsat-lst/catalog.json)
 - [Great Data Products podcast episode](https://greatdataproducts.com/episodes/2026/09/wesley-heat-data/)
 
+## Cite
+
+If you use the composites, cite the dataset:
+
+> Lebovits, N., & Wesley, E. (2026). *Landsat LST P95 composites (2021–2025)* [Data set]. Source Cooperative. <https://source.coop/nlebovits/landsat-lst>
+
+```bibtex
+@misc{lebovits2026landsat,
+  author    = {Lebovits, Nissim and Wesley, Elizabeth},
+  title     = {Landsat {LST} {P95} composites (2021--2025)},
+  year      = {2026},
+  publisher = {Source Cooperative},
+  url       = {https://source.coop/nlebovits/landsat-lst}
+}
+```
+
+GitHub's **Cite this repository** button reads
+[`CITATION.cff`](./CITATION.cff), which lists the same dataset.
+
 ## Development
 
 Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) to set up the project, and

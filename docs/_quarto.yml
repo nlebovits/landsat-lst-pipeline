@@ -92,10 +92,13 @@ website:
           - contribute/changelog.qmd
       - text: "---"
       - text: Web map
+        icon: map
         href: https://sensable-heat.vercel.app/
       - text: Dataset on Source Cooperative
+        icon: database
         href: https://source.coop/nlebovits/landsat-lst
       - text: Source code on GitHub
+        icon: github
         href: https://github.com/nlebovits/landsat-lst-pipeline
 
   page-footer:

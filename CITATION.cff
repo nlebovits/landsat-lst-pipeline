@@ -3,7 +3,7 @@ cff-version: 1.2.0
 message: >-
   If you use this software or the composites it produced, cite them as below.
 type: software
-title: "Landsat LST P95 composites (2021-2025)"
+title: "Landsat LST P95 composites (2021–2025)"
 abstract: >-
   Processing code and metadata for scene-normalized 95th-percentile land
   surface temperature composites from Landsat 8 and 9 observations, 2021 to
@@ -12,6 +12,7 @@ abstract: >-
 authors:
   - given-names: Nissim
     family-names: Lebovits
+    affiliation: Radiant Earth
   - given-names: Elizabeth
     family-names: Wesley
     affiliation: World Resources Institute
@@ -31,13 +32,17 @@ keywords:
   - Source Cooperative
 references:
   - type: data
-    title: "Landsat LST P95 composites (2021-2025)"
+    title: "Landsat LST P95 composites (2021–2025)"
     authors:
       - given-names: Nissim
         family-names: Lebovits
+        affiliation: Radiant Earth
       - given-names: Elizabeth
         family-names: Wesley
         affiliation: World Resources Institute
+    year: 2026
+    publisher:
+      name: Source Cooperative
     license: CC0-1.0
     url: "https://source.coop/nlebovits/landsat-lst"
     repository: "https://data.source.coop/nlebovits/landsat-lst/catalog.json"

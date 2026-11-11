@@ -48,6 +48,37 @@ body {
   letter-spacing: -0.01em;
 }
 
+// The color scheme toggle shows the scheme a click switches to: a moon in
+// light mode, a sun in dark mode. Quarto adds `.alternate` when the dark
+// stylesheet is active. The glyphs come from the Bootstrap Icons font, so
+// they take the text color in both schemes.
+.quarto-color-scheme-toggle .bi::before {
+  width: auto;
+  height: auto;
+  background-image: none !important;
+  font-family: bootstrap-icons !important;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--lst-fg);
+  content: "\f497";
+}
+
+.quarto-color-scheme-toggle.alternate .bi::before {
+  content: "\f5a2";
+}
+
+// Links that leave the site carry an icon in the accent color. A wrapped
+// label lines up with its first line, not under the icon.
+.sidebar-item a[href^="http"] {
+  display: flex;
+  align-items: baseline;
+}
+
+.sidebar-item a[href^="http"] .bi {
+  margin-right: 0.45rem;
+  color: var(--bs-primary);
+}
+
 h1,
 h2,
 h3,

@@ -61,40 +61,10 @@ website:
   back-to-top-navigation: true
   bread-crumbs: false
 
+  # The navbar holds only the links that leave the site. The sidebar is the
+  # index of every page.
   navbar:
     title: Landsat LST P95
-    collapse-below: lg
-    left:
-      - text: Home
-        href: index.qmd
-      - text: Quickstart
-        href: quickstart.qmd
-      - text: Tutorial
-        href: tutorials/pergamino.qmd
-      - text: Examples
-        href: examples/index.qmd
-      - text: About
-        menu:
-          - text: Philosophy
-            href: about/philosophy.qmd
-          - text: Methods
-            href: about/methods.qmd
-          - text: Known issues
-            href: about/known-issues.qmd
-          - text: Intended use
-            href: about/intended-use.qmd
-          - text: Provenance and license
-            href: about/provenance.qmd
-      - text: Contribute
-        menu:
-          - text: Contributing
-            href: contribute/index.qmd
-          - text: Contribute a notebook
-            href: contribute/notebooks.qmd
-          - text: Code of conduct
-            href: contribute/code-of-conduct.qmd
-          - text: Changelog
-            href: contribute/changelog.qmd
     right:
       - text: Web map
         icon: map
@@ -106,6 +76,32 @@ website:
       - icon: github
         href: https://github.com/nlebovits/landsat-lst-pipeline
         aria-label: Source code on GitHub
+
+  sidebar:
+    style: docked
+    collapse-level: 2
+    contents:
+      - text: Home
+        href: index.qmd
+      - quickstart.qmd
+      - text: Tutorial
+        href: tutorials/pergamino.qmd
+      - text: Examples
+        href: examples/index.qmd
+      - section: About
+        contents:
+          - about/philosophy.qmd
+          - about/methods.qmd
+          - about/known-issues.qmd
+          - about/intended-use.qmd
+          - about/provenance.qmd
+      - section: Contribute
+        contents:
+          - text: Contributing
+            href: contribute/index.qmd
+          - contribute/notebooks.qmd
+          - contribute/code-of-conduct.qmd
+          - contribute/changelog.qmd
 
   page-footer:
     left:

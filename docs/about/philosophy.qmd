@@ -1,10 +1,9 @@
 ---
 title: Philosophy
-description: Why the dataset exists, who it serves, and what it leaves to other heat data.
 ---
 
 {{< include /_readme/philosophy.md >}}
 
 ## Further listening
 
-Nissim Lebovits of [Radiant Earth](https://radiant.earth/) and Elizabeth Wesley of the [World Resources Institute](https://www.wri.org/) discuss the dataset on [Great Data Products](https://greatdataproducts.com/). In the episode [Fit for Purpose: Building Global Heat Data for Local Planning](https://greatdataproducts.com/episodes/2026/09/wesley-heat-data/), they explain why a five-year P95 composite serves cities with no other heat data. The episode also covers the decision to leave emissivity gaps unfilled.
+{{< video https://www.youtube.com/watch?v=nlRk-m1o8qw title="Fit for Purpose: Building Global Heat Data for Local Planning" >}}

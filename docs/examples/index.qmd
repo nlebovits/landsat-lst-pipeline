@@ -1,8 +1,5 @@
 ---
 title: Examples
-description: >-
-  Notebooks that read the composite next to other cloud-native data for one
-  place, contributed by people who work there.
 toc: false
 code-tools: false
 listing:

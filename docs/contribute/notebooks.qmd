@@ -1,8 +1,5 @@
 ---
 title: Contribute a notebook
-description: >-
-  Add an example notebook about one place to the gallery, through a pull
-  request.
 ---
 
 The [examples gallery](../examples/index.qmd) collects notebooks that each

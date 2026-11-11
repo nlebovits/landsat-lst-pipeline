@@ -1,6 +1,5 @@
 ---
 title: Code of conduct
-description: The Contributor Covenant 2.1, as this project applies it.
 toc: false
 ---
 

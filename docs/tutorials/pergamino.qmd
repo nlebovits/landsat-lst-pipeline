@@ -6,9 +6,6 @@ author:
   - name: Elizabeth Wesley
     affiliation: World Resources Institute
 date: 2026-11-11
-description: >
-  A worked heat-risk assessment for Pergamino, Buenos Aires Province, that
-  reads only the pixels and rows it needs from Source Cooperative.
 format:
   html:
     code-fold: true

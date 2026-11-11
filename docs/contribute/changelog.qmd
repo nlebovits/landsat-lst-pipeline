@@ -1,6 +1,5 @@
 ---
 title: Changelog
-description: What changed in each release.
 ---
 
 {{< include ../../CHANGELOG.md >}}

@@ -1,6 +1,5 @@
 ---
 title: Methods
-description: How the pipeline turns five years of Landsat scenes into one composite, and how it removes the stripes between them.
 ---
 
 {{< include /_readme/processing.md >}}

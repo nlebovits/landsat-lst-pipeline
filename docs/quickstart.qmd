@@ -1,6 +1,5 @@
 ---
 title: "Quickstart"
-description: "Read a window of the Landsat LST P95 composite in Python, then hide the pixels that too few observations support."
 ---
 
 This page shows you how to read the composite from Python. You open one tile

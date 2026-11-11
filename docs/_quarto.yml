@@ -90,15 +90,14 @@ website:
           - contribute/notebooks.qmd
           - contribute/code-of-conduct.qmd
           - contribute/changelog.qmd
+      # Links that leave the site. _external-links.html marks each with an
+      # arrow and a tooltip that names the destination.
       - text: "---"
       - text: Web map
-        icon: map
         href: https://sensable-heat.vercel.app/
-      - text: Dataset on Source Cooperative
-        icon: database
+      - text: Dataset
         href: https://source.coop/nlebovits/landsat-lst
-      - text: Source code on GitHub
-        icon: github
+      - text: Source code
         href: https://github.com/nlebovits/landsat-lst-pipeline
 
   page-footer:
@@ -107,12 +106,22 @@ website:
       Code [Apache-2.0](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/LICENSE) ·
       Data [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/)
 
+# One color scheme, light. Naming the brand file as the light brand stops
+# Quarto from building a second, dark stylesheet from it. With no dark
+# stylesheet, Quarto renders no color-scheme toggle.
+brand:
+  light: _brand.yml
+
 format:
   html:
-    theme:
-      light: [brand, styles.scss, light.scss]
-      dark: [brand, styles.scss, dark.scss]
-    respect-user-color-scheme: true
+    theme: [brand, styles.scss]
+    highlight-style: lst-code.theme
+    # Beside a docked sidebar, Quarto sets the text column to body-width plus
+    # 200px, less 3em: 640px here, about 78 characters of 17px IBM Plex Sans.
+    # Quarto's default of 800px gives a 950px column and lines near 110.
+    grid:
+      body-width: 491px
+    include-after-body: _external-links.html
     toc: true
     toc-depth: 3
     toc-title: On this page

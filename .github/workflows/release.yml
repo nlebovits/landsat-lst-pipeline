@@ -89,23 +89,24 @@ jobs:
           fi
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "first=$([ "$version" = "$current" ] && echo true || echo false)" \
-            >> "$GITHUB_OUTPUT"
 
       - name: Write the release notes
         env:
           VERSION: ${{ steps.bump.outputs.version }}
-          FIRST: ${{ steps.bump.outputs.first }}
         run: |
-          if [ "$FIRST" = "true" ]; then
-            # The hand-written section: from its heading to the next one.
-            awk -v head="## v${VERSION} (" '
-              index($0, head) == 1 { on = 1; next }
-              on && /^## / { exit }
-              on { print }
-            ' CHANGELOG.md > notes.md
-          else
-            $CZ changelog "$VERSION" --dry-run > notes.md
+          # The version's CHANGELOG.md section, from its heading to the next
+          # one. `cz bump` writes the heading as `## v<version> (<date>)`,
+          # the same form as the hand-written first section. Asking
+          # `cz changelog` for the section instead fails, because
+          # `changelog_incremental` refuses a version range.
+          awk -v head="## v${VERSION} (" '
+            index($0, head) == 1 { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no notes under '## v${VERSION} ('."
+            exit 1
           fi
           cat notes.md
 

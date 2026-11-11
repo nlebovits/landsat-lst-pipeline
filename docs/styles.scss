@@ -393,6 +393,13 @@ figcaption {
   color: var(--lst-mute);
 }
 
+// Every image scales down to its column. Quarto's retina figures carry a
+// fixed width attribute and no img-fluid class, so they need this rule.
+main img {
+  max-width: 100%;
+  height: auto;
+}
+
 // A quoted passage, such as the citation on the homepage, is text to copy.
 // It keeps the body color and size, set off by a rule.
 main blockquote,

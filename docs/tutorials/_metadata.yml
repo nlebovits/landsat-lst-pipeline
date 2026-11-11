@@ -1,8 +1,0 @@
-# Tutorials carry multi-panel maps about 1100 px wide. In the site's 640 px
-# text column their legends render near 7 px. A body width of 760 px gives a
-# 909 px column beside the docked sidebar, and the legends render near 10 px.
-# A click on any figure still opens it at full size (lightbox, _quarto.yml).
-format:
-  html:
-    grid:
-      body-width: 760px

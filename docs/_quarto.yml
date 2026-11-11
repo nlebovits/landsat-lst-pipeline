@@ -116,11 +116,11 @@ format:
   html:
     theme: [brand, styles.scss]
     highlight-style: lst-code.theme
-    # Beside a docked sidebar, Quarto sets the text column to body-width plus
-    # 200px, less 3em: 640px here, about 78 characters of 17px IBM Plex Sans.
-    # Quarto's default of 800px gives a 950px column and lines near 110.
+    # One column on every page, shared by text, figures, tables, and code.
+    # Beside a docked sidebar, Quarto lets the column grow to body-width plus
+    # 200px, less 3em: 849px here, and shrinks it on narrower windows.
     grid:
-      body-width: 491px
+      body-width: 700px
     include-after-body: _external-links.html
     # A click on a figure opens it at full size.
     lightbox: auto

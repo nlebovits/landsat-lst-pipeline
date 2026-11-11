@@ -244,9 +244,15 @@ and `docs/conformance.md` stay repository documents and never become pages.
 - Notebook pages run with `freeze: auto`. After a notebook executes, commit
   `docs/_freeze/` with it, including `docs/_freeze/site_libs/`. CI renders
   from the committed freeze and fails when the render changes it.
+- `freeze: auto` watches only a notebook's own source. Its other inputs,
+  `docs/_plotting.py`, `docs/fonts/`, and the files in its own subdirectory,
+  have hashes in `docs/_notebook_inputs.json`. After you execute a notebook
+  because one of them changed, run
+  `python3 .github/scripts/docs_notebooks.py record` and commit the manifest
+  with the freeze. CI fails on a mismatch.
 - `.github/workflows/docs.yml` executes each notebook a pull request touches
   from an empty freeze, and every notebook when `uv.lock`, the `docs`
-  dependency group, or `docs/_plotting.py` changes. A cell error fails the
+  dependency group, `docs/_plotting.py`, or `docs/fonts/` changes. A cell error fails the
   job. A weekly run executes them all and opens one issue on failure. Pushes
   to `main` deploy `docs/_site/` to GitHub Pages.
 - A notebook that needs a new package adds it to the `docs` group in the same

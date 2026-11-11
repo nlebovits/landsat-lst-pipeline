@@ -8,9 +8,12 @@
 #   notebooks  Executes each picked notebook from an empty freeze. A cell that
 #              raises fails the job, because Quarto's default `error: false`
 #              stops the render at the first cell error.
-#   render     Renders the whole site with `freeze: auto`. A notebook whose
-#              source no longer matches its committed freeze executes again
-#              here, and the job fails because `docs/_freeze/` changed.
+#   render     Fails first when a notebook's inputs outside its source, such
+#              as docs/_plotting.py or its data, differ from the hashes in
+#              docs/_notebook_inputs.json. Then renders the whole site with
+#              `freeze: auto`. A notebook whose source no longer matches its
+#              committed freeze executes again here, and the job fails
+#              because `docs/_freeze/` changed.
 #   report     The weekly run only. Opens or updates one issue when a
 #              notebook fails.
 #   deploy     Pushes to main only. Publishes `docs/_site/` to GitHub Pages.
@@ -49,83 +52,15 @@ jobs:
         with:
           fetch-depth: 2
 
-      # A notebook is any tracked .qmd under docs/ with a ```{python} cell.
-      #
-      # On a pull request, the checkout is the merge commit, so `HEAD^1` is
-      # the tip of the base branch and the diff is exactly the change. Three
-      # changes select every notebook: uv.lock, the `docs` dependency group
-      # in pyproject.toml, and docs/_plotting.py. A changed file inside a
-      # notebook's own directory, such as its data, selects that notebook.
+      # .github/scripts/docs_notebooks.py defines a notebook and its inputs.
+      # uv.lock, the `docs` dependency group, docs/_plotting.py, and
+      # docs/fonts/ select every notebook. A changed file in a notebook's own
+      # subdirectory, such as its data, selects that notebook.
       - name: Pick the notebooks to execute
         id: pick
         env:
           EVENT: ${{ github.event_name }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import subprocess
-          import tomllib
-          from pathlib import PurePosixPath
-
-
-          def git(*args: str) -> str:
-              return subprocess.run(
-                  ["git", *args], check=True, capture_output=True, text=True
-              ).stdout
-
-
-          notebooks = sorted(
-              path
-              for path in git("ls-files", "--", "docs/*.qmd").splitlines()
-              if any(
-                  line.strip().startswith("```{python")
-                  for line in open(path, encoding="utf-8")
-              )
-          )
-
-
-          def docs_group(rev: str) -> list[str]:
-              try:
-                  text = git("show", f"{rev}:pyproject.toml")
-              except subprocess.CalledProcessError:
-                  return []
-              groups = tomllib.loads(text).get("dependency-groups", {})
-              return groups.get("docs", [])
-
-
-          if os.environ["EVENT"] != "pull_request":
-              picked = notebooks
-              reason = "every notebook, on a scheduled or manual run"
-          else:
-              changed = set(git("diff", "--name-only", "HEAD^1", "HEAD").splitlines())
-              shared = {"uv.lock", "docs/_plotting.py"} & changed
-              if "pyproject.toml" in changed and docs_group("HEAD^1") != docs_group("HEAD"):
-                  shared.add("the docs dependency group")
-              if shared:
-                  picked = notebooks
-                  reason = "every notebook, because these changed: " + ", ".join(sorted(shared))
-              else:
-                  picked = [
-                      nb
-                      for nb in notebooks
-                      if nb in changed
-                      or any(
-                          PurePosixPath(path).is_relative_to(PurePosixPath(nb).parent)
-                          and not path.endswith(".qmd")
-                          and not path.startswith("docs/_freeze/")
-                          for path in changed
-                      )
-                  ]
-                  reason = "the notebooks this pull request changed"
-
-          print(f"Selected {len(picked)} of {len(notebooks)} notebooks: {reason}.")
-          for nb in picked:
-              print(f"  {nb}")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"matrix={json.dumps({'notebook': picked})}\n")
-              out.write(f"any={'true' if picked else 'false'}\n")
-          PY
+        run: python3 .github/scripts/docs_notebooks.py pick --event "$EVENT"
 
   notebooks:
     name: Execute ${{ matrix.notebook }}
@@ -175,6 +110,12 @@ jobs:
 
       - name: Install the docs environment
         run: uv sync --group docs --frozen
+
+      # `freeze: auto` watches only each notebook's own source. This step
+      # compares the inputs outside it, such as docs/_plotting.py and a
+      # tutorial's data, with the hashes in docs/_notebook_inputs.json.
+      - name: Check that each notebook's inputs match its freeze
+        run: python3 .github/scripts/docs_notebooks.py check
 
       - name: Render
         run: uv run --group docs quarto render docs

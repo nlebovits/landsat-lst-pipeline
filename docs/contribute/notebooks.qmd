@@ -150,6 +150,21 @@ from the committed freeze. If a notebook's source no longer matches its
 freeze, the render executes the notebook again, and the workflow fails because
 `docs/_freeze/` changed.
 
+Quarto compares only the notebook's own source with its freeze. A notebook
+also reads `docs/_plotting.py`, the fonts in `docs/fonts/`, and the other
+files in its own directory, such as a data file. The file
+`docs/_notebook_inputs.json` records a hash of those inputs for each
+notebook, and the docs workflow fails when one no longer matches. After you
+change an input, execute the notebook again and update the record:
+
+```bash
+uv run --group docs quarto render \
+  docs/examples/<slug>/index.qmd --execute
+python3 .github/scripts/docs_notebooks.py record
+```
+
+Commit the refreshed freeze and `docs/_notebook_inputs.json` together.
+
 ## Open the pull request
 
 Open a pull request against `main`, and fill in the template's fields for the

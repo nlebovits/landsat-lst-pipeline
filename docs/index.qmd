@@ -11,6 +11,8 @@ toc: false
 code-tools: false
 repo-actions: false
 image: images/thumbnail.png
+filters:
+  - _demote.lua
 ---
 
 ::::::: lst-landing
@@ -48,9 +50,9 @@ Hotter
 
 ::::::
 
-## About the dataset
-
+::: demote
 {{< include /_readme/intro.md >}}
+:::
 
 ## Learn more
 

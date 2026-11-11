@@ -21,8 +21,8 @@ across a city or region, especially where no other heat data exists.
   [known issues](https://nlebovits.github.io/landsat-lst-pipeline/about/known-issues.html),
   [intended use](https://nlebovits.github.io/landsat-lst-pipeline/about/intended-use.html),
   and [provenance](https://nlebovits.github.io/landsat-lst-pipeline/about/provenance.html)
-- [Examples](https://nlebovits.github.io/landsat-lst-pipeline/examples.html)
-- [Contribute](https://nlebovits.github.io/landsat-lst-pipeline/contribute.html)
+- [Examples](https://nlebovits.github.io/landsat-lst-pipeline/examples/)
+- [Contribute](https://nlebovits.github.io/landsat-lst-pipeline/contribute/)
 - [Web map](https://sensable-heat.vercel.app/)
 - [Dataset on Source Cooperative](https://source.coop/nlebovits/landsat-lst)
   and its [STAC catalog](https://data.source.coop/nlebovits/landsat-lst/catalog.json)

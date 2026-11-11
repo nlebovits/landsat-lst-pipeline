@@ -206,6 +206,12 @@ perf = "Changed"
 # The package's own name. `src/lst/*` imports `lst.*`, which is first-party and
 # not a missing dependency.
 known_first_party = ["lst"]
+# `docs/` holds the site's plotting helpers and the notebook data scripts.
+# They import the `docs` group (contextily, lonboard, h5netcdf), which deptry
+# reports as DEP004, a dev dependency imported by non-dev code. Nothing an
+# instance runs lives there, and the docs workflow executes every notebook
+# against the locked group, which is the check that matters for those imports.
+extend_exclude = ["docs"]
 
 [tool.deptry.per_rule_ignores]
 # DEP002 is "declared but never imported". deptry found four. Two were real

@@ -106,7 +106,8 @@ jobs:
       - name: pytest
         run: uv run pytest
 
-      # Every Python block in README.md and in the four published documents,
+      # Every Python block in the storage-and-access README section, the
+      # quickstart page, and the four published documents,
       # run against https://data.source.coop/nlebovits/landsat-lst/. A
       # documented example is a promise, and a generated one is a string that
       # nothing executes: the AGENTS.md decode example shipped for months

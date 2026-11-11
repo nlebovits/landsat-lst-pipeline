@@ -122,6 +122,8 @@ format:
     grid:
       body-width: 491px
     include-after-body: _external-links.html
+    # A click on a figure opens it at full size.
+    lightbox: auto
     toc: true
     toc-depth: 3
     toc-title: On this page

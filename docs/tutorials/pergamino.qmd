@@ -73,11 +73,9 @@ That module defines the figure style, the colormaps, and the dimmed imagery base
 ```{python}
 #| label: setup
 import io
-import json
 import math
 import sys
 import time
-import urllib.request
 import warnings
 from pathlib import Path
 
@@ -148,8 +146,11 @@ IDE_URL = "https://data.source.coop/nlebovits/pergamino-ide"
 CENSUS_URL = "https://data.source.coop/nlebovits/censo-argentino/2022"
 GHSL_ITEMS_URL = "https://data.source.coop/nlebovits/ghsl/pop-2025/items.parquet"
 CHM_TILES_URL = "https://data.source.coop/tge-labs/meta-chm-v2/tiles.parquet"
-OVERTURE_STAC_URL = "https://stac.overturemaps.org/catalog.json"
-OVERTURE_RELEASE = "latest"  # or a release id such as "2026-10-21.0"
+# A fixed release keeps the building counts reproducible. Overture keeps only
+# its last few releases on S3, so the weekly docs run fails when this one is
+# retired. To move forward, pick a current id from
+# https://stac.overturemaps.org/catalog.json and re-render.
+OVERTURE_RELEASE = "2026-10-21.0"
 TX35_PATH = DOCS_DIR / "tutorials" / "data" / "pergamino_tx35.parquet"
 
 # Hazard.
@@ -695,10 +696,7 @@ Each separate piece of urban land becomes one small window, which keeps the rura
 
 ```{python}
 #| label: buildings
-with urllib.request.urlopen(OVERTURE_STAC_URL) as response:
-    overture_release = (
-        json.load(response)["latest"] if OVERTURE_RELEASE == "latest" else OVERTURE_RELEASE
-    )
+overture_release = OVERTURE_RELEASE
 
 # Filter on the bounding box of the urban classes in DuckDB, then clip locally.
 ux0, uy0, ux1, uy1 = aglomerados.total_bounds

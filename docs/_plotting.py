@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 
 import contextily as cx
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import font_manager
 from matplotlib.colors import ListedColormap
 from matplotlib_scalebar.scalebar import ScaleBar
 
@@ -68,7 +70,13 @@ CMAP_OBSERVATIONS = "cividis"
 
 HOTSPOT_COLOR = "#d3436e"  # magma at 0.6, for hotspot pixels over imagery
 
-FONT_FAMILIES = ["IBM Plex Sans", "Inter", "Source Sans 3", "DejaVu Sans"]
+FONT_FAMILIES = ["IBM Plex Sans", "DejaVu Sans"]
+
+# The site's typeface ships with the repository, in Regular and SemiBold, so a
+# figure renders the same on a laptop and on a CI runner that has no fonts
+# installed. IBM Plex Sans 1.1.0 from github.com/IBM/plex, under the SIL Open
+# Font License 1.1 in docs/fonts/OFL.txt.
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
 
 # The PNG resolution. 110 dots per inch keeps a full-width map with an imagery
 # basemap under 500 KB while staying sharp on a standard display.
@@ -82,6 +90,8 @@ METRES_PER_DEGREE = 111_320.0
 
 def apply_style() -> None:
     """Set the matplotlib defaults every tutorial figure shares."""
+    for font in sorted(FONT_DIR.glob("*.ttf")):
+        font_manager.fontManager.addfont(str(font))
     mpl.rcParams.update(
         {
             "font.family": "sans-serif",

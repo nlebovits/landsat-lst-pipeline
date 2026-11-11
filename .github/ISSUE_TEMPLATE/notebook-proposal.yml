@@ -1,0 +1,47 @@
+name: Notebook proposal
+description: Propose an example notebook for the docs site's gallery.
+labels: [notebook]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        The guide at
+        https://nlebovits.github.io/landsat-lst-pipeline/contribute/notebooks.html
+        covers the folder layout, the front matter, and the checks. A proposal
+        is optional. Open one to agree on the scope before you write the
+        notebook.
+  - type: input
+    id: place
+    attributes:
+      label: Place
+      description: The city or region the notebook covers.
+      placeholder: Pergamino, Argentina
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: The planning question the notebook answers.
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data sources
+      description: >-
+        Each dataset, with a link and its format. Say which ones are not
+        cloud-optimized, and why the notebook needs them anyway.
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Expected run time
+      description: Minutes on a laptop. CI allows 25.
+      placeholder: "8"
+  - type: textarea
+    id: packages
+    attributes:
+      label: New packages
+      description: Python packages the notebook needs that the docs group does not declare yet.

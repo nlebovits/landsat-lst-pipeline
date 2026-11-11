@@ -50,11 +50,14 @@ jobs:
       - name: Dependency declarations
         run: uvx deptry@0.23.1 . --no-ansi
 
+      # Python, Markdown, and the docs site's Quarto pages. Not the frozen
+      # notebook outputs or the rendered site, which `quarto render` writes.
       - name: Spell check
         run: |
           uvx codespell \
             --skip "*.csv,*.json,*.log,*.npz,*.tif,.git" \
-            $(git ls-files '*.py' '*.md')
+            $(git ls-files '*.py' '*.md' '*.qmd' \
+              ':(exclude)docs/_freeze/**' ':(exclude)docs/_site/**')
 
   typecheck:
     name: Type check

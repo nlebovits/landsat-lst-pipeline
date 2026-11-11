@@ -33,10 +33,11 @@ hooks = [
   # --- Format & whitespace ---
   # `docs/_freeze/` holds the frozen notebook outputs that `quarto render`
   # writes. A fixer that rewrites them makes the freeze differ from what Quarto
-  # regenerates, and the docs workflow fails on that difference.
-  { id = "trailing-whitespace", exclude = { glob = "docs/_freeze/**" } },
-  { id = "end-of-file-fixer", exclude = { glob = "docs/_freeze/**" } },
-  { id = "mixed-line-ending", exclude = { glob = "docs/_freeze/**" } },
+  # regenerates, and the docs workflow fails on that difference. `docs/fonts/`
+  # holds IBM Plex and its license as IBM ships them.
+  { id = "trailing-whitespace", exclude = { glob = ["docs/_freeze/**", "docs/fonts/**"] } },
+  { id = "end-of-file-fixer", exclude = { glob = ["docs/_freeze/**", "docs/fonts/**"] } },
+  { id = "mixed-line-ending", exclude = { glob = ["docs/_freeze/**", "docs/fonts/**"] } },
 
   # --- Syntax validation ---
   { id = "check-yaml" },

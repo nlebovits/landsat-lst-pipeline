@@ -45,7 +45,7 @@ This tutorial answers four questions for Pergamino, and its code adapts to anoth
 - How many days above 35 °C does the climate record show, and how many do the models project?
 - Which parts of the city run hottest on hot days?
 - How much do tree canopy and buildings explain the pattern?
-- Who lives in the hottest places, and how many of them live in materially deprived households?
+- Who lives in the hottest places, and how many of them are vulnerable?
 
 The analysis ends with five recommendations that apply under every emissions scenario.
 The [sensable-heat web map](https://sensable-heat.vercel.app/) displays the same data, and you can browse its layers for any city.
@@ -59,7 +59,7 @@ For the reasoning behind the product, listen to the [Great Data Products episode
 | Canopy height model v2 | Meta and the World Resources Institute | COG | 1.19 m | [Source Cooperative](https://source.coop/tge-labs/meta-chm-v2) |
 | GHS-POP R2023A, 2025 epoch | European Commission JRC | COG | 100 m | [Source Cooperative](https://source.coop/nlebovits/ghsl) |
 | Building footprints | Overture Maps Foundation | GeoParquet | Footprint | [Overture docs](https://docs.overturemaps.org/guides/buildings/) |
-| Census 2022: population and household deprivation | INDEC, with tract geometry from CONICET | GeoParquet, Parquet | Census tract | [Source Cooperative](https://source.coop/nlebovits/censo-argentino) |
+| Census 2022: population and household material deprivation | INDEC, with tract geometry from CONICET | GeoParquet, Parquet | Census tract | [Source Cooperative](https://source.coop/nlebovits/censo-argentino) |
 
 : The datasets this tutorial reads. {#tbl-datasets}
 
@@ -420,7 +420,7 @@ handles = [
 fig.legend(handles=handles, loc="outside lower center", ncols=4, fontsize=8)
 plot.suptitle(
     fig,
-    f"Hot days rise under every scenario, to {high_ratio:.1f} times the baseline under SSP5-8.5",
+    f"Hot days reach {high_ratio:.1f} times the baseline under SSP5-8.5",
 )
 plt.show()
 ```
@@ -679,7 +679,7 @@ handles = [
     ],
 ]
 fig.legend(handles=handles, loc="outside lower center", ncols=4, fontsize=8)
-plot.suptitle(fig, "Each class has its own hotspots, most of them on the edges of built-up land")
+plot.suptitle(fig, "Most hotspots sit on the edges of built-up land")
 plt.show()
 ```
 
@@ -831,7 +831,7 @@ for ax, share, cmap, label, title in [
     plot.colorbar_below(ax, im, label, ticks=cover_norm.boundaries)
     ax.set_title(title)
 plot.north_arrow(axes[1])
-plot.suptitle(fig, "Buildings fill the core; the densest canopy sits in patches near the edge")
+plot.suptitle(fig, "Buildings fill the core and canopy clusters near the edge")
 plt.show()
 ```
 
@@ -897,7 +897,7 @@ bar.outline.set_visible(False)
 bar.set_label("Pixels per hexagon", fontsize=8.5)
 bar.ax.tick_params(labelsize=8, length=2)
 fig.legend(handles=handles, loc="outside lower center", ncols=2, fontsize=8)
-plot.suptitle(fig, "Bare pixels run hottest; canopy and roofs both cool them, until roofs cover almost everything")
+plot.suptitle(fig, "Bare pixels run hottest")
 plt.show()
 ```
 
@@ -1025,7 +1025,7 @@ weight = np.where(
     PIXEL_AREA_M2 / np.where(area_by_tract > 0, area_by_tract, 1.0)[tract_id],
 )
 census_pop = np.where(tract_id > 0, weight * census_total[tract_id], 0.0).astype("float32")
-deprived_pop = census_pop * np.r_[0.0, tracts.deprived_share.to_numpy()][tract_id]
+vulnerable_pop = census_pop * np.r_[0.0, tracts.deprived_share.to_numpy()][tract_id]
 ```
 
 ```{python}
@@ -1128,15 +1128,15 @@ def per_tract(values):
 city_tracts = tracts.assign(
     residents=per_tract(census_pop),
     exposed=per_tract(census_pop * hotspot),
-    deprived_exposed=per_tract(deprived_pop * hotspot),
+    vulnerable_exposed=per_tract(vulnerable_pop * hotspot),
     deprived_pct=np.where(tracts.households > 0, 100 * tracts.deprived_share, np.nan),
 )
 city_tracts = gpd.clip(city_tracts[city_tracts.residents >= 1], city.union_all(),
                        keep_geom_type=True)
 by_exposed = city_tracts.exposed.sort_values(ascending=False).cumsum()
 tracts_half_exposed = int((by_exposed < by_exposed.iloc[-1] / 2).sum()) + 1
-by_deprived = city_tracts.deprived_exposed.sort_values(ascending=False).cumsum()
-tracts_half_deprived = int((by_deprived < by_deprived.iloc[-1] / 2).sum()) + 1
+by_vulnerable = city_tracts.vulnerable_exposed.sort_values(ascending=False).cumsum()
+tracts_half_vulnerable = int((by_vulnerable < by_vulnerable.iloc[-1] / 2).sum()) + 1
 
 # Hotspot outlines inside the city, traced along pixel edges.
 city_transform = rasterio.windows.transform(city_win, GRID_TRANSFORM)
@@ -1207,8 +1207,8 @@ bar = plot.colorbar_below(ax_t, plt.cm.ScalarMappable(exposed_norm, population_c
                           "Census residents in hotspots, per census radio",
                           ticks=exposed_norm.boundaries, extend=exposed_norm.extend)
 count_ticks(bar)
-ax_d.set_title("Where people live, and the hotspots")
-ax_t.set_title("Residents in hotspots, by census radio")
+ax_d.set_title("Population density vs. hotspots")
+ax_t.set_title("Residents in hotspots, per census radio")
 plot.north_arrow(ax_t)
 fig.legend(handles=[plot.legend_line(plot.HOTSPOT_COLOR, "Hotspot outline", 1.2)],
            loc="outside lower center", fontsize=8)
@@ -1231,8 +1231,8 @@ IPMH places each household in one of four categories:
 3. Deprivation of property resources only, which tracks the quality of the dwelling and its services.
 4. Convergent deprivation, both at once.
 
-The analysis counts categories 2, 3, and 4 as deprived.
-It applies each tract's share of deprived households to the people the dasymetric step places in that tract.
+The analysis counts the residents of households in categories 2, 3, and 4 as vulnerable.
+It applies each tract's share of households in those categories to the people the dasymetric step places in that tract.
 That share describes households, not people, and larger households weigh more in it than the step assumes.
 
 ::: {.callout-tip}
@@ -1260,75 +1260,75 @@ Use this analysis to direct their attention, not to replace their knowledge.
 
 ```{python}
 #| label: tbl-vulnerability
-#| tbl-cap: "Census population, deprived population, and the share of each in hotspots, by urban class. The inequity ratio divides the deprived share in hotspots by the overall share; above 1, deprived residents live in hotspots more often than their neighbors."
+#| tbl-cap: "Census population, vulnerable population, and the share of each in hotspots, per urban class. The inequity ratio divides the vulnerable share in hotspots by the overall share. Above 1, vulnerable residents live in hotspots more often than their neighbors."
 total_pop, hot_pop = by_class(census_pop)
-total_dep, hot_dep = by_class(deprived_pop)
+total_vul, hot_vul = by_class(vulnerable_pop)
 vulnerability = pd.DataFrame({
     "class": URBAN_CLASSES,
     "population": total_pop, "exposed": hot_pop,
-    "deprived": total_dep, "deprived_exposed": hot_dep,
+    "vulnerable": total_vul, "vulnerable_exposed": hot_vul,
 }).assign(
     exposed_share=lambda d: 100 * d.exposed / d.population,
-    deprived_exposed_share=lambda d: 100 * d.deprived_exposed / d.deprived,
-    inequity=lambda d: d.deprived_exposed_share / d.exposed_share,
+    vulnerable_exposed_share=lambda d: 100 * d.vulnerable_exposed / d.vulnerable,
+    inequity=lambda d: d.vulnerable_exposed_share / d.exposed_share,
 )
-deprived_rate = 100 * total_dep.sum() / total_pop.sum()
+deprivation_rate = 100 * total_vul.sum() / total_pop.sum()
 inequity = vulnerability.set_index("class").inequity
 table = pd.DataFrame({
     "Urban class": [plot.URBAN_CLASS_LABELS[c] for c in URBAN_CLASSES],
     "Population": vulnerability.population.round().astype(int),
     "In hotspots (%)": vulnerability.exposed_share,
-    "Deprived residents": vulnerability.deprived.round().astype(int),
-    "Deprived in hotspots (%)": vulnerability.deprived_exposed_share,
+    "Vulnerable residents": vulnerability.vulnerable.round().astype(int),
+    "Vulnerable in hotspots (%)": vulnerability.vulnerable_exposed_share,
     "Inequity ratio": vulnerability.inequity,
 })
 md_table(table, floatfmt="{:.2f}")
 ```
 
-About `{python} f"{deprived_rate:.0f}"`% of urban residents live in a household with some material deprivation.
+About `{python} f"{deprivation_rate:.0f}"`% of urban residents live in a household with some material deprivation.
 In the city's urban class, the inequity ratio reaches `{python} f"{inequity['urbana']:.2f}"`, and in the peri-urban class `{python} f"{inequity['periurbana']:.2f}"`.
-At those values, a deprived resident is more likely than a neighbor to live in a hotspot.
+At those values, a vulnerable resident is more likely than a neighbor to live in a hotspot.
 In the rural settlements the ratio is `{python} f"{inequity['urbano en ruralidad']:.2f}"`.
 Use these ratios to rank places for a closer look, not as a count of people at risk.
 
 ```{python}
 #| label: fig-vulnerability-map
-#| fig-cap: "Left, the share of households in each census radio with some material deprivation (IPMH categories 2 to 4), shown on the radio's urban and peri-urban land, with hotspots outlined. Right, residents of deprived households who live in hotspots, summed per census radio. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
-#| fig-alt: "Two maps of the city of Pergamino over grey imagery, shaded by census radio in violets. The left map shows the share of deprived households, lowest in the center and highest in radios on the fringe, with thin magenta hotspot outlines that fall mostly on those darker fringe radios. The right map shows deprived residents in hotspots, near zero across the core and darkest in radios along the western, northern and southern edges."
-DEPRIVED_COLOR = "#6250d6"
-deprivation_cmap = LinearSegmentedColormap.from_list(
-    "deprivation", ["#ecebfa", DEPRIVED_COLOR, "#22186a"]
+#| fig-cap: "Left, the share of households in each census radio with some material deprivation (IPMH categories 2 to 4), shown on the radio's urban and peri-urban land, with hotspots outlined. Right, vulnerable residents who live in hotspots, summed per census radio. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
+#| fig-alt: "Two maps of the city of Pergamino over grey imagery, shaded by census radio in violets. The left map shows the share of households with material deprivation, lowest in the center and highest in radios on the fringe, with thin magenta hotspot outlines that fall mostly on those darker fringe radios. The right map shows vulnerable residents in hotspots, near zero across the core and darkest in radios along the western, northern and southern edges."
+VULNERABLE_COLOR = "#6250d6"
+vulnerability_cmap = LinearSegmentedColormap.from_list(
+    "vulnerability", ["#ecebfa", VULNERABLE_COLOR, "#22186a"]
 )
 share_norm = quantile_norm(city_tracts.deprived_pct)
-deprived_norm = quantile_norm(city_tracts.deprived_exposed)
+vulnerable_norm = quantile_norm(city_tracts.vulnerable_exposed)
 
 fig, (ax_s, ax_e) = plt.subplots(1, 2, figsize=(10, 4.9))
 for ax, column, norm, label in [
     (ax_s, "deprived_pct", share_norm, "Households with material deprivation (%)"),
-    (ax_e, "deprived_exposed", deprived_norm,
-     "Residents of deprived households in hotspots, per census radio"),
+    (ax_e, "vulnerable_exposed", vulnerable_norm,
+     "Vulnerable residents in hotspots, per census radio"),
 ]:
     plot.frame(ax, city_frame, margin=0.01)
     plot.basemap(ax, dim=0.6, credit=ax is ax_e)
-    city_tracts.plot(ax=ax, column=column, cmap=deprivation_cmap, norm=norm,
+    city_tracts.plot(ax=ax, column=column, cmap=vulnerability_cmap, norm=norm,
                      edgecolor="white", linewidth=0.4, zorder=1)
     city_outline.plot(ax=ax, color=plot.INK, linewidth=0.5, zorder=4)
     plot.scalebar(ax)
-    bar = plot.colorbar_below(ax, plt.cm.ScalarMappable(norm, deprivation_cmap), label,
+    bar = plot.colorbar_below(ax, plt.cm.ScalarMappable(norm, vulnerability_cmap), label,
                               ticks=norm.boundaries, extend=norm.extend)
     count_ticks(bar)
 hotspot_outline.plot(ax=ax_s, color=plot.HOTSPOT_COLOR, linewidth=0.7, zorder=3,
                      path_effects=hotspot_halo)
-ax_s.set_title("Deprivation, with the hotspots")
-ax_e.set_title("Deprived residents in hotspots, by census radio")
+ax_s.set_title("Material deprivation vs. hotspots")
+ax_e.set_title("Vulnerable residents in hotspots, per census radio")
 plot.north_arrow(ax_e)
 fig.legend(handles=[plot.legend_line(plot.HOTSPOT_COLOR, "Hotspot outline", 1.2)],
            loc="outside lower center", fontsize=8)
-plot.suptitle(fig, "Deprivation and hotspots meet in a few radios on the city's edge")
+plot.suptitle(fig, "Vulnerability and hotspots meet in a few radios on the city's edge")
 plt.show()
 ```
 
-Half of the deprived residents in the city's hotspots live in `{python} tracts_half_deprived` of its `{python} len(city_tracts)` radios.
+Half of the vulnerable residents in the city's hotspots live in `{python} tracts_half_vulnerable` of its `{python} len(city_tracts)` radios.
 
 ## Risk by barrio
 
@@ -1352,7 +1352,7 @@ pixels = per_barrio(np.ones(GRID_SHAPE))
 barrio_risk = barrios[["nombre"]].assign(
     population=per_barrio(census_pop),
     exposed=per_barrio(census_pop, hotspot),
-    deprived_exposed=per_barrio(deprived_pop, hotspot),
+    vulnerable_exposed=per_barrio(vulnerable_pop, hotspot),
     mean_lst=per_barrio(lst) / per_barrio(np.isfinite(lst)),
     canopy=100 * per_barrio(canopy_share) / per_barrio(np.isfinite(canopy_share)),
     hotspot_share=100 * per_barrio(hotspot) / pixels,
@@ -1405,7 +1405,7 @@ bar = plot.colorbar_below(ax, plt.cm.ScalarMappable(barrio_norm, population_cmap
 count_ticks(bar)
 handles = [
     Patch(facecolor="white", edgecolor=plot.MUTED, hatch="////",
-                      label=f"Fewer than {MIN_BARRIO_POPULATION} residents, not ranked"),
+                      label=f"Not ranked (fewer than {MIN_BARRIO_POPULATION} residents)"),
 ]
 fig.legend(handles=handles, loc="outside lower center", fontsize=8)
 plot.suptitle(fig, "Most residents in hotspots live in barrios north and south of the center")
@@ -1416,18 +1416,18 @@ The `{python} NUMBERED_BARRIOS` numbered barrios hold `{python} f"{numbered_shar
 
 ```{python}
 #| label: fig-barrios
-#| fig-cap: "The barrios with the most census residents in hotspots, ranked. Left, all residents in hotspots and residents of deprived households in hotspots. Center, mean 95th percentile LST across the barrio. Right, mean canopy cover. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Meta and WRI canopy height model v2; Municipalidad de Pergamino."
-#| fig-alt: "A ranked dot plot with barrio names down the left side. The first panel shows a gray dot for residents in hotspots and a violet dot for deprived residents in hotspots, joined by a line, with the largest counts at the top. The second panel shows each barrio's mean temperature as a dot colored on the temperature scale. The third panel shows canopy cover as green dots, mostly between 5 and 15 percent."
+#| fig-cap: "The barrios with the most census residents in hotspots, ranked. Left, all residents in hotspots and vulnerable residents in hotspots. Center, mean 95th percentile LST across the barrio. Right, mean canopy cover. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Meta and WRI canopy height model v2; Municipalidad de Pergamino."
+#| fig-alt: "A ranked dot plot with barrio names down the left side. The first panel shows a gray dot for residents in hotspots and a violet dot for vulnerable residents in hotspots, joined by a line, with the largest counts at the top. The second panel shows each barrio's mean temperature as a dot colored on the temperature scale. The third panel shows canopy cover as green dots, mostly between 5 and 15 percent."
 top = barrio_risk.head(TOP_BARRIOS).iloc[::-1]
 y = np.arange(len(top))
 
 fig, (ax_p, ax_t, ax_c) = plt.subplots(1, 3, figsize=(10, 6.4), sharey=True,
                                        width_ratios=[2.2, 1, 1])
-ax_p.hlines(y, top.deprived_exposed, top.exposed, color=plot.GRID, lw=2, zorder=1)
+ax_p.hlines(y, top.vulnerable_exposed, top.exposed, color=plot.GRID, lw=2, zorder=1)
 ax_p.scatter(top.exposed, y, s=46, color=plot.INK_SECONDARY, edgecolor="white", lw=1.5,
              zorder=3, label="All residents in hotspots")
-ax_p.scatter(top.deprived_exposed, y, s=46, color=DEPRIVED_COLOR, edgecolor="white", lw=1.5,
-             zorder=3, label="Residents of deprived households in hotspots")
+ax_p.scatter(top.vulnerable_exposed, y, s=46, color=VULNERABLE_COLOR, edgecolor="white", lw=1.5,
+             zorder=3, label="Vulnerable residents in hotspots")
 ax_p.set_xlabel("People in hotspots (census 2022)")
 ax_p.set_yticks(y, top.nombre)
 ax_p.set_xlim(0, None)
@@ -1466,12 +1466,12 @@ Read the share column in the table beside the count before you choose where to s
 #| tbl-cap: "Barrios ranked by census residents in hotspots."
 table = barrio_risk.head(TOP_BARRIOS).assign(
     rank=lambda d: np.arange(1, len(d) + 1),
-)[["rank", "nombre", "population", "exposed", "exposed_share", "deprived_exposed", "mean_lst", "canopy"]]
+)[["rank", "nombre", "population", "exposed", "exposed_share", "vulnerable_exposed", "mean_lst", "canopy"]]
 table.columns = [
     "Rank", "Barrio", "Residents", "In hotspots", "In hotspots (%)",
-    "Deprived in hotspots", "Mean P95 LST (°C)", "Canopy (%)",
+    "Vulnerable in hotspots", "Mean P95 LST (°C)", "Canopy (%)",
 ]
-for c in ["Residents", "In hotspots", "Deprived in hotspots"]:
+for c in ["Residents", "In hotspots", "Vulnerable in hotspots"]:
     table[c] = table[c].round().astype(int)
 md_table(table)
 ```
@@ -1491,8 +1491,9 @@ summary = pd.DataFrame(
         ("Hazard", "Median P95 LST, urban class", f"{lst_class_median['urbana']:.1f} °C"),
         ("Exposure", "Residents in hotspots, range across sources",
          f"{n(exposed_low)} to {n(exposed_high)}"),
-        ("Vulnerability", "Urban residents in deprived households", f"{deprived_rate:.0f}%"),
-        ("Vulnerability", "Deprived residents in hotspots, census", n(hot_dep.sum())),
+        ("Vulnerability", "Urban residents in households with material deprivation",
+         f"{deprivation_rate:.0f}%"),
+        ("Vulnerability", "Vulnerable residents in hotspots (census)", n(hot_vul.sum())),
         ("Barrios", "Barrio with the most residents in hotspots", top3.nombre.iloc[0]),
     ],
     columns=["Dimension", "Measure", "Value"],
@@ -1538,9 +1539,9 @@ Set clear thresholds that activate an emergency response, and coordinate them ac
 
 An emergency plan needs little capital and adapts as conditions change, which makes it the right first step under any scenario.
 
-### 2. Reduce risk where exposure and deprivation meet
+### 2. Reduce risk where exposure and vulnerability meet
 
-Direct capital spending to the barrios that rank high on both residents and deprived residents in hotspots.
+Direct capital spending to the barrios that rank high on both residents and vulnerable residents in hotspots.
 
 - Start with `{python} top3.nombre.iloc[0]`, `{python} top3.nombre.iloc[1]`, and `{python} top3.nombre.iloc[2]`.
 - Fund green and blue infrastructure there first, and build passive cooling into every new public building.
@@ -1585,7 +1586,7 @@ Understanding builds the political support that sustained investment needs, and 
 ### Limits of this analysis
 
 - **Surface is not air.** LST ranks surfaces by heat, and it does not measure the heat stress a person feels.
-- **Deprivation is not vulnerability.** IPMH misses age, health, isolation, and outdoor work.
+- **Material deprivation is one part of vulnerability.** IPMH misses age, health, isolation, and outdoor work.
 - **Models disagree.** The run-to-run spread in @tbl-projections is wide, especially late in the century.
 - **No local knowledge.** Field visits and conversations with residents should test every ranking here.
 
@@ -1656,11 +1657,11 @@ hotspot_layer = PolygonLayer.from_geopandas(
 
 barrio_props = barrio_risk.rename(columns={
     "population": "residents", "exposed": "residents_in_hotspots",
-    "deprived_exposed": "deprived_in_hotspots", "mean_lst": "mean_p95_lst_c",
+    "vulnerable_exposed": "vulnerable_in_hotspots", "mean_lst": "mean_p95_lst_c",
     "canopy": "canopy_pct",
 })
 barrio_gdf = barrios[["nombre", "geometry"]].merge(
-    barrio_props[["nombre", "residents", "residents_in_hotspots", "deprived_in_hotspots",
+    barrio_props[["nombre", "residents", "residents_in_hotspots", "vulnerable_in_hotspots",
                   "mean_p95_lst_c", "canopy_pct"]].round(1),
     on="nombre", how="left",
 )

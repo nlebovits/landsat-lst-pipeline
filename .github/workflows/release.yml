@@ -1,0 +1,127 @@
+# Cut a release from main. Run it by hand from the Actions tab.
+#
+# commitizen reads the Conventional Commits since the last tag, picks the next
+# version, and writes it to pyproject.toml and uv.lock. It also writes a
+# CHANGELOG.md section, commits, and creates an annotated `v<version>` tag.
+# This workflow updates CITATION.cff to match, pushes the commit and the tag,
+# and publishes a GitHub release whose notes are that version's changelog.
+#
+# The first release is the exception. pyproject.toml already says 0.1.0 and
+# CHANGELOG.md already holds a hand-written v0.1.0 section, so when no
+# `v<current version>` tag exists yet, the workflow dates that section, tags
+# the current version, and releases it as it stands.
+#
+# main has no branch protection, which is what lets GITHUB_TOKEN push the
+# release commit. A push made with GITHUB_TOKEN starts no other workflow, so
+# the docs site redeploys on the next ordinary push to main.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CZ: uvx --from commitizen==4.19.3 cz
+
+jobs:
+  release:
+    name: Bump, tag, and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history and every tag: commitizen reads the commits since the
+      # last tag to choose the increment.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Configure the release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump the version, or date the first release
+        id: bump
+        run: |
+          today="$(date -u +%Y-%m-%d)"
+          current="$($CZ version --project)"
+
+          if git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
+            # Every release after the first.
+            version="$($CZ bump --get-next)"
+            sed -i \
+              -e "s/^version: .*/version: ${version}/" \
+              -e "s/^date-released: .*/date-released: \"${today}\"/" \
+              CITATION.cff
+            # `cz bump` commits with `git commit -a`, which picks up the
+            # CITATION.cff edit above along with its own files.
+            $CZ bump --yes
+          else
+            # The first release: tag the version pyproject.toml already
+            # declares, under the changelog section written for it.
+            version="${current}"
+            if ! grep -q "^## v${version} (" CHANGELOG.md; then
+              echo "::error::CHANGELOG.md has no '## v${version} (...)' section to release."
+              exit 1
+            fi
+            sed -i -E \
+              "s/^## v${version//./\\.} \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$/## v${version} (${today})/" \
+              CHANGELOG.md
+            sed -i \
+              -e "s/^version: .*/version: ${version}/" \
+              -e "s/^date-released: .*/date-released: \"${today}\"/" \
+              CITATION.cff
+            if ! git diff --quiet; then
+              git commit -am "chore(release): date v${version}"
+            fi
+            git tag -a "v${version}" -m "v${version}"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "first=$([ "$version" = "$current" ] && echo true || echo false)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          FIRST: ${{ steps.bump.outputs.first }}
+        run: |
+          if [ "$FIRST" = "true" ]; then
+            # The hand-written section: from its heading to the next one.
+            awk -v head="## v${VERSION} (" '
+              index($0, head) == 1 { on = 1; next }
+              on && /^## / { exit }
+              on { print }
+            ' CHANGELOG.md > notes.md
+          else
+            $CZ changelog "$VERSION" --dry-run > notes.md
+          fi
+          cat notes.md
+
+      - name: Push the release commit and tag
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git push origin HEAD:main
+          git push origin "refs/tags/v${VERSION}"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag

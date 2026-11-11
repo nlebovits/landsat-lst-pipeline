@@ -1,0 +1,43 @@
+# The release workflow updates `version` and `date-released` on each release.
+cff-version: 1.2.0
+message: >-
+  If you use this software or the composites it produced, cite them as below.
+type: software
+title: "Landsat LST P95 composites (2021-2025)"
+abstract: >-
+  Processing code and metadata for scene-normalized 95th-percentile land
+  surface temperature composites from Landsat 8 and 9 observations, 2021 to
+  2025, published as cloud-optimized GeoTIFFs in a Portolan catalog on Source
+  Cooperative.
+authors:
+  - given-names: Nissim
+    family-names: Lebovits
+  - given-names: Elizabeth
+    family-names: Wesley
+    affiliation: World Resources Institute
+license: Apache-2.0
+repository-code: "https://github.com/nlebovits/landsat-lst-pipeline"
+url: "https://nlebovits.github.io/landsat-lst-pipeline/"
+version: 0.1.0
+date-released: "2026-11-11"
+keywords:
+  - land surface temperature
+  - extreme heat
+  - Landsat
+  - remote sensing
+  - cloud-optimized GeoTIFF
+  - STAC
+  - Portolan
+  - Source Cooperative
+references:
+  - type: data
+    title: "Landsat LST P95 composites (2021-2025)"
+    authors:
+      - given-names: Nissim
+        family-names: Lebovits
+      - given-names: Elizabeth
+        family-names: Wesley
+        affiliation: World Resources Institute
+    license: CC0-1.0
+    url: "https://source.coop/nlebovits/landsat-lst"
+    repository: "https://data.source.coop/nlebovits/landsat-lst/catalog.json"

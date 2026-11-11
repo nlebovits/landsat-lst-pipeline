@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation site
+    url: https://nlebovits.github.io/landsat-lst-pipeline/
+    about: The quickstart, the tutorial, and the methods behind the composite.
+  - name: Known issues in the data
+    url: https://nlebovits.github.io/landsat-lst-pipeline/about/known-issues.html
+    about: Gaps the dataset already documents, before you report a new one.
+  - name: Report a security problem
+    url: https://github.com/nlebovits/landsat-lst-pipeline/security/advisories/new
+    about: Report it privately, as SECURITY.md describes.

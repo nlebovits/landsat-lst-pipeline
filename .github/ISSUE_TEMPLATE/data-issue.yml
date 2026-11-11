@@ -1,0 +1,55 @@
+name: Data issue
+description: Report a value, a gap, or a stripe in the published composite that looks wrong.
+labels: [data]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Read the known issues page first:
+        https://nlebovits.github.io/landsat-lst-pipeline/about/known-issues.html.
+        It covers the ASTER GED gaps and the cloud-cover gaps in the tropics.
+  - type: input
+    id: tile
+    attributes:
+      label: Tile ID
+      description: The STAC item ID, such as S30W065. Leave it empty if you do not know it.
+      placeholder: S30W065
+  - type: input
+    id: location
+    attributes:
+      label: Longitude and latitude
+      description: A point inside the problem area, in decimal degrees, longitude first.
+      placeholder: -60.57, -33.89
+    validations:
+      required: true
+  - type: dropdown
+    id: asset
+    attributes:
+      label: Asset
+      options:
+        - lst_p95
+        - qa_count
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-looks-wrong
+    attributes:
+      label: What looks wrong
+      description: >-
+        The value you read and the value you expected, and why. A stripe, a
+        seam, a hole, or an implausible temperature all belong here.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How you read it
+      description: The tool or code you used, such as QGIS, the web map, or a rasterio snippet.
+      render: python
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshot or comparison
+      description: A screenshot, or a reference dataset that disagrees, with a link.

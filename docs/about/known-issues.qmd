@@ -1,0 +1,6 @@
+---
+title: Known issues
+description: Where gaps in ASTER GED coverage and persistent cloud cover leave nodata.
+---
+
+{{< include /_readme/known-issues.md >}}

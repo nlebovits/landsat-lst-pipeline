@@ -1,0 +1,22 @@
+// Light scheme. Neutral greys and the darker magma accent from _brand.yml.
+
+/*-- scss:defaults --*/
+$navbar-bg: #fafaf9;
+$navbar-fg: #0c0e11;
+$navbar-hl: #a52f6c;
+$footer-bg: #fafaf9;
+$footer-fg: #5e5e5a;
+$body-secondary-color: #5e5e5a;
+$code-color: #0c0e11;
+$code-bg: #f0f0ed;
+
+/*-- scss:rules --*/
+:root {
+  --lst-fg: #0c0e11;
+  --lst-mute: #5e5e5a;
+  --lst-line: #dcdcd8;
+  --lst-line-strong: #b8b8b2;
+  --lst-surface-2: #f0f0ed;
+  --lst-on-primary: #ffffff;
+  --lst-focus: #a52f6c;
+}

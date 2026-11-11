@@ -65,6 +65,10 @@ jobs:
       - name: Test repository-owned rules
         run: uv run pytest -q -p no:randomly tests/test_prose_styles.py
 
+      # The docs site's Quarto pages (`*.qmd`) are prose too. `docs/_freeze/`
+      # and `docs/_site/` are what `quarto render` writes, not what anyone
+      # wrote.
+      #
       # AGENTS.md is generated context, and `evidence/` holds retained
       # measurement output. .vale.ini already gives both an empty
       # BasedOnStyles, but proselint has no per-path config, so the exclusions
@@ -79,10 +83,12 @@ jobs:
       - name: Report every Vale finding
         run: |
           mapfile -d '' files < <(
-            git ls-files -z -- '*.md' '*.mdx' \
+            git ls-files -z -- '*.md' '*.mdx' '*.qmd' \
               ':(exclude)AGENTS.md' \
               ':(exclude).claude/**' \
-              ':(exclude)evidence/**'
+              ':(exclude)evidence/**' \
+              ':(exclude)docs/_freeze/**' \
+              ':(exclude)docs/_site/**'
           )
           if ((${#files[@]})); then
             vale --minAlertLevel=suggestion --output=line "${files[@]}" || true
@@ -91,10 +97,12 @@ jobs:
       - name: Report proselint findings
         run: |
           mapfile -d '' files < <(
-            git ls-files -z -- '*.md' '*.mdx' \
+            git ls-files -z -- '*.md' '*.mdx' '*.qmd' \
               ':(exclude)AGENTS.md' \
               ':(exclude).claude/**' \
-              ':(exclude)evidence/**'
+              ':(exclude)evidence/**' \
+              ':(exclude)docs/_freeze/**' \
+              ':(exclude)docs/_site/**'
           )
           if ((${#files[@]})); then
             uvx --from proselint==0.16.0 proselint check \
@@ -104,10 +112,12 @@ jobs:
       - name: Gate handwritten documentation
         run: |
           mapfile -d '' files < <(
-            git ls-files -z -- '*.md' '*.mdx' \
+            git ls-files -z -- '*.md' '*.mdx' '*.qmd' \
               ':(exclude)AGENTS.md' \
               ':(exclude).claude/**' \
-              ':(exclude)evidence/**'
+              ':(exclude)evidence/**' \
+              ':(exclude)docs/_freeze/**' \
+              ':(exclude)docs/_site/**'
           )
           if ((${#files[@]})); then
             vale --minAlertLevel=error --output=line "${files[@]}"

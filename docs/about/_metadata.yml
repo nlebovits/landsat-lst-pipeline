@@ -1,0 +1,9 @@
+# These pages include text written for another place: the README partials in
+# docs/_readme/ and the governance files at the repository root. The filter
+# drops a leading heading that repeats the page title and lifts the rest so
+# the shallowest heading sits at level 2. See docs/_headings.lua.
+filters:
+  - ../_headings.lua
+
+# Text pages: no code, so no code menu.
+code-tools: false

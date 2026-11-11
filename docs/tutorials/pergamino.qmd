@@ -3,6 +3,7 @@ title: "Extreme heat risk in Pergamino"
 subtitle: "Climate projections, surface heat, exposure, and vulnerability for a mid-sized Argentine city, from cloud-optimized open data"
 author:
   - name: Nissim Lebovits
+    affiliation: Radiant Earth
   - name: Elizabeth Wesley
     affiliation: World Resources Institute
 date: 2026-11-11
@@ -86,9 +87,11 @@ import rasterio
 import shapely
 from affine import Affine
 from IPython.display import Markdown
+from matplotlib import patheffects
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, LogNorm
+from matplotlib.patches import Patch
 from rasterio.enums import Resampling
-from rasterio.features import rasterize
+from rasterio.features import rasterize, shapes
 from rasterio.warp import reproject, transform_bounds
 from rasterio.windows import Window, from_bounds
 from shapely.geometry import box
@@ -172,11 +175,13 @@ MIN_BIN_PIXELS = 50  # a bin with fewer pixels gets no median
 DEPRIVED_IPMH_CATEGORIES = ("2", "3", "4")  # any material deprivation
 MIN_BARRIO_POPULATION = 100  # leave out barrios with fewer residents
 TOP_BARRIOS = 20  # barrios in the ranked chart
+NUMBERED_BARRIOS = 10  # top-ranked barrios numbered on the barrio map
 
 # Maps.
 AREA_CRS = "EPSG:5347"  # POSGAR 2007 / Argentina 5, for areas in metres
 RURAL_PANELS = 2  # rural settlements shown in the hotspot figure
 DISPLAY_BLOCK = 5  # cover maps show means over 5 x 5 LST pixels
+MAP_STEPS = 5  # color steps in each census radio and barrio map
 
 # GDAL settings for reading COGs over HTTP with as few requests as possible.
 GDAL_ENV = {
@@ -500,7 +505,8 @@ lst = np.where(lst_dn == 0, np.nan, lst_dn * LST_SCALE + LST_OFFSET).astype("flo
 qa_total = qa_monthly.sum(axis=0, dtype="int32")
 
 # A pixel on a geographic grid shrinks east-west with latitude. Its area, in
-# square metres, converts population densities into counts later on.
+# square metres, spreads a census count over a tract that has no modeled
+# population.
 lat_centres = GRID_TRANSFORM.f + (np.arange(GRID_SHAPE[0]) + 0.5) * GRID_TRANSFORM.e
 pixel_w_m = abs(GRID_TRANSFORM.a) * plot.METRES_PER_DEGREE * np.cos(np.radians(lat_centres))
 pixel_h_m = abs(GRID_TRANSFORM.e) * plot.METRES_PER_DEGREE
@@ -921,7 +927,8 @@ This section compares three, and reports how far they disagree instead of one nu
 
 The [GHSL mirror](https://source.coop/nlebovits/ghsl) indexes its tiles in a STAC GeoParquet file.
 The code finds the tiles that cover the partido and reads one window from each in its native Mollweide projection.
-It then resamples the density onto the LST grid.
+It then moves the counts onto the LST grid with [sum resampling](https://gdal.org/en/stable/programs/gdalwarp.html#cmdoption-gdalwarp-r).
+GDAL splits each 100 m cell's count among the LST pixels that overlap it, in proportion to the overlap, which keeps the total.
 
 ```{python}
 #| label: ghsl
@@ -936,7 +943,9 @@ ghsl_items = con.sql(f"""
 # Mollweide extent overlaps the area, and read only that window.
 GHSL_CRS = "ESRI:54009"
 mx0, my0, mx1, my1 = transform_bounds("EPSG:4326", GHSL_CRS, *AOI_BOUNDS, densify_pts=21)
-ghsl_density = np.zeros(GRID_SHAPE, dtype="float32")  # persons per square metre
+partido_native = partido.to_crs(GHSL_CRS).geometry.iloc[0]
+ghsl_native_partido = 0.0  # the partido's total on the native grid, for a check
+ghsl_pop = np.zeros(GRID_SHAPE, dtype="float32")  # persons per LST pixel
 with rasterio.Env(**GDAL_ENV):
     for row in ghsl_items.itertuples():
         bx0, by0, bx1, by1 = row.proj_bbox
@@ -948,17 +957,26 @@ with rasterio.Env(**GDAL_ENV):
             win = from_bounds(mx0, my0, mx1, my1, transform=src.transform)
             win = win.round_offsets().round_lengths()
             people = src.read(1, window=win, boundless=True, fill_value=0)
-            density = np.where(people < 0, 0, people) / 10_000.0  # 100 m by 100 m cells
+            people = np.where(people < 0, 0, people).astype("float32")  # nodata is negative
+            native_in_partido = rasterize(
+                [(partido_native, 1)], out_shape=people.shape,
+                transform=src.window_transform(win), fill=0, dtype="uint8",
+            )
+            ghsl_native_partido += float(people[native_in_partido == 1].sum())
+            # Sum resampling moves counts, not densities. Each LST pixel gets
+            # the overlap-weighted share of every 100 m cell it touches.
             part = np.zeros(GRID_SHAPE, dtype="float32")
             reproject(
-                density, part,
-                src_transform=src.window_transform(win), src_crs=src.crs,
-                dst_transform=GRID_TRANSFORM, dst_crs=GRID_CRS,
-                resampling=Resampling.nearest,
+                people, part,
+                src_transform=src.window_transform(win), src_crs=src.crs, src_nodata=-1,
+                dst_transform=GRID_TRANSFORM, dst_crs=GRID_CRS, dst_nodata=0,
+                resampling=Resampling.sum,
             )
-            ghsl_density += part
-ghsl_pop = ghsl_density * PIXEL_AREA_M2  # persons per LST pixel
+            ghsl_pop += part
 ```
+
+On its native grid, GHS-POP places `{python} n(ghsl_native_partido)` people in the partido, and the LST grid holds `{python} n(ghsl_pop[in_partido].sum())`.
+Each grid assigns a cell on the partido boundary by its center, which accounts for the small difference.
 
 The census joins two files from the [census catalog](https://source.coop/nlebovits/censo-argentino).
 `radios.parquet` holds tract boundaries and total population, `POB_TOT_P`.
@@ -1095,6 +1113,109 @@ Every class holds fewer people in its hotspots than an even spread would place t
 That finding matches the driver analysis: bare lots, yards, and sheds heat up, and few people sleep in them.
 The people who do live there sit on the city's growing edge, which makes them the focus of the next two sections.
 
+```{python}
+#| label: tracts-city
+in_city = np.isin(urban_class, [class_codes["urbana"], class_codes["periurbana"]])
+
+
+def per_tract(values):
+    """Sum a per-pixel quantity over each census radio's urban and peri-urban land."""
+    v = np.nan_to_num(values) * in_city
+    return np.bincount(tract_id.ravel(), weights=v.ravel(), minlength=len(tracts) + 1)[1:]
+
+
+# Each census radio, cut to the city's urban and peri-urban classes.
+city_tracts = tracts.assign(
+    residents=per_tract(census_pop),
+    exposed=per_tract(census_pop * hotspot),
+    deprived_exposed=per_tract(deprived_pop * hotspot),
+    deprived_pct=np.where(tracts.households > 0, 100 * tracts.deprived_share, np.nan),
+)
+city_tracts = gpd.clip(city_tracts[city_tracts.residents >= 1], city.union_all(),
+                       keep_geom_type=True)
+by_exposed = city_tracts.exposed.sort_values(ascending=False).cumsum()
+tracts_half_exposed = int((by_exposed < by_exposed.iloc[-1] / 2).sum()) + 1
+by_deprived = city_tracts.deprived_exposed.sort_values(ascending=False).cumsum()
+tracts_half_deprived = int((by_deprived < by_deprived.iloc[-1] / 2).sum()) + 1
+
+# Hotspot outlines inside the city, traced along pixel edges.
+city_transform = rasterio.windows.transform(city_win, GRID_TRANSFORM)
+hot_in_city = (hotspot & in_city)[city_rows, city_cols].astype("uint8")
+hotspot_outline = gpd.GeoSeries(
+    [shapely.geometry.shape(g) for g, _ in
+     shapes(hot_in_city, mask=hot_in_city == 1, transform=city_transform)],
+    crs="EPSG:4326",
+).boundary
+
+
+def rounded_up(x):
+    """x rounded up to two significant figures."""
+    step = 10 ** (math.floor(math.log10(x)) - 1)
+    return math.ceil(x / step) * step
+
+
+def quantile_norm(values, steps=MAP_STEPS, top=1.0):
+    """Color steps that hold about equal numbers of values, at rounded edges.
+
+    The last step ends at the `top` quantile; values above it share the
+    colorbar's extension.
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    inner = np.quantile(v, np.linspace(0, 1, steps + 1)[1:-1])
+    upper = rounded_up(np.quantile(v, top))
+    edges = np.unique([0.0, *(float(f"{e:.2g}") for e in inner), upper])
+    return BoundaryNorm(edges, 256, extend="max" if v.max() > upper else "neither")
+
+
+def count_ticks(bar):
+    """Label a colorbar's steps as whole numbers with thousands separators."""
+    bar.ax.xaxis.set_major_formatter(lambda x, _: f"{x:,.0f}")
+
+
+hotspot_halo = [patheffects.withStroke(linewidth=1.8, foreground="white")]
+```
+
+Half of the city's residents in hotspots live in `{python} tracts_half_exposed` of the `{python} len(city_tracts)` census radios that reach its urban and peri-urban land.
+The median radio has `{python} n(city_tracts.population.median())` census residents, and half of the radios have between `{python} n(city_tracts.population.quantile(0.25))` and `{python} n(city_tracts.population.quantile(0.75))`.
+Radios of similar size make a count per radio comparable across the map.
+
+```{python}
+#| label: fig-exposure-map
+#| fig-cap: "Left, census residents per hectare inside the city's urban and peri-urban classes, after the dasymetric step, with hotspots outlined. Right, census residents who live in hotspots, summed per census radio over the same land. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
+#| fig-alt: "Two maps of the city of Pergamino over grey imagery. The left map shades residents per hectare in blues, darkest in the core and lighter toward the edges, with thin magenta outlines around the hotspots. The hotspots cluster on the fringe and enclose mostly pale pixels. The right map shades census radios by residents in hotspots, pale across the core and darkest in radios along the western, northern and southern edges of the city."
+density = np.where(in_city, 10_000 * census_pop / PIXEL_AREA_M2, np.nan)  # per hectare
+density_norm = quantile_norm(density[in_city & (density > 0)], top=0.99)
+exposed_norm = quantile_norm(city_tracts.exposed)
+population_cmap = truncated(plot.CMAP_POPULATION)
+
+fig, (ax_d, ax_t) = plt.subplots(1, 2, figsize=(10, 4.9))
+for ax in (ax_d, ax_t):
+    plot.frame(ax, city_frame, margin=0.01)
+    plot.basemap(ax, dim=0.6, credit=ax is ax_t)
+    city_outline.plot(ax=ax, color=plot.INK, linewidth=0.5, zorder=4)
+    plot.scalebar(ax)
+im = ax_d.imshow(np.where(density > 0, density, np.nan), extent=GRID_EXTENT,
+                 cmap=population_cmap, norm=density_norm, zorder=1)
+hotspot_outline.plot(ax=ax_d, color=plot.HOTSPOT_COLOR, linewidth=0.7, zorder=3,
+                     path_effects=hotspot_halo)
+city_tracts.plot(ax=ax_t, column="exposed", cmap=population_cmap, norm=exposed_norm,
+                 edgecolor="white", linewidth=0.4, zorder=1)
+count_ticks(plot.colorbar_below(ax_d, im, "Census residents per hectare",
+                                ticks=density_norm.boundaries, extend=density_norm.extend))
+bar = plot.colorbar_below(ax_t, plt.cm.ScalarMappable(exposed_norm, population_cmap),
+                          "Census residents in hotspots, per census radio",
+                          ticks=exposed_norm.boundaries, extend=exposed_norm.extend)
+count_ticks(bar)
+ax_d.set_title("Where people live, and the hotspots")
+ax_t.set_title("Residents in hotspots, by census radio")
+plot.north_arrow(ax_t)
+fig.legend(handles=[plot.legend_line(plot.HOTSPOT_COLOR, "Hotspot outline", 1.2)],
+           loc="outside lower center", fontsize=8)
+plot.suptitle(fig, "Most hotspot residents live in the radios on the city's edge")
+plt.show()
+```
+
 ## Vulnerability: who is most at risk?
 
 Exposure asks who is there.
@@ -1170,6 +1291,45 @@ At those values, a deprived resident is more likely than a neighbor to live in a
 In the rural settlements the ratio is `{python} f"{inequity['urbano en ruralidad']:.2f}"`.
 Use these ratios to rank places for a closer look, not as a count of people at risk.
 
+```{python}
+#| label: fig-vulnerability-map
+#| fig-cap: "Left, the share of households in each census radio with some material deprivation (IPMH categories 2 to 4), shown on the radio's urban and peri-urban land, with hotspots outlined. Right, residents of deprived households who live in hotspots, summed per census radio. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
+#| fig-alt: "Two maps of the city of Pergamino over grey imagery, shaded by census radio in violets. The left map shows the share of deprived households, lowest in the center and highest in radios on the fringe, with thin magenta hotspot outlines that fall mostly on those darker fringe radios. The right map shows deprived residents in hotspots, near zero across the core and darkest in radios along the western, northern and southern edges."
+DEPRIVED_COLOR = "#6250d6"
+deprivation_cmap = LinearSegmentedColormap.from_list(
+    "deprivation", ["#ecebfa", DEPRIVED_COLOR, "#22186a"]
+)
+share_norm = quantile_norm(city_tracts.deprived_pct)
+deprived_norm = quantile_norm(city_tracts.deprived_exposed)
+
+fig, (ax_s, ax_e) = plt.subplots(1, 2, figsize=(10, 4.9))
+for ax, column, norm, label in [
+    (ax_s, "deprived_pct", share_norm, "Households with material deprivation (%)"),
+    (ax_e, "deprived_exposed", deprived_norm,
+     "Residents of deprived households in hotspots, per census radio"),
+]:
+    plot.frame(ax, city_frame, margin=0.01)
+    plot.basemap(ax, dim=0.6, credit=ax is ax_e)
+    city_tracts.plot(ax=ax, column=column, cmap=deprivation_cmap, norm=norm,
+                     edgecolor="white", linewidth=0.4, zorder=1)
+    city_outline.plot(ax=ax, color=plot.INK, linewidth=0.5, zorder=4)
+    plot.scalebar(ax)
+    bar = plot.colorbar_below(ax, plt.cm.ScalarMappable(norm, deprivation_cmap), label,
+                              ticks=norm.boundaries, extend=norm.extend)
+    count_ticks(bar)
+hotspot_outline.plot(ax=ax_s, color=plot.HOTSPOT_COLOR, linewidth=0.7, zorder=3,
+                     path_effects=hotspot_halo)
+ax_s.set_title("Deprivation, with the hotspots")
+ax_e.set_title("Deprived residents in hotspots, by census radio")
+plot.north_arrow(ax_e)
+fig.legend(handles=[plot.legend_line(plot.HOTSPOT_COLOR, "Hotspot outline", 1.2)],
+           loc="outside lower center", fontsize=8)
+plot.suptitle(fig, "Deprivation and hotspots meet in a few radios on the city's edge")
+plt.show()
+```
+
+Half of the deprived residents in the city's hotspots live in `{python} tracts_half_deprived` of its `{python} len(city_tracts)` radios.
+
 ## Risk by barrio
 
 The barrio is the unit that municipal staff and residents recognize.
@@ -1205,7 +1365,54 @@ barrio_risk = (
 )
 top3 = barrio_risk.head(3)
 top5_share = 100 * barrio_risk.exposed.head(5).sum() / barrio_risk.exposed.sum()
+numbered_share = (
+    100 * barrio_risk.exposed.head(NUMBERED_BARRIOS).sum() / barrio_risk.exposed.sum()
+)
 ```
+
+```{python}
+#| label: fig-barrio-map
+#| fig-cap: "Pergamino's barrios shaded by census residents in hotspots, the measure that ranks them in @tbl-barrios. Numbers mark the top-ranked barrios by their rank. Hatched barrios have too few residents to rank. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
+#| fig-alt: "A map of the city of Pergamino over grey imagery, with its barrios shaded in blues by the number of residents who live in hotspots. The barrios numbered 1 to 10 in white circles are the darkest. Five of them, including the top four, form a block north of the center, four sit south and east of the arroyo, and number 10 is the large central barrio. The barrios along the arroyo and on the eastern fringe are pale, and four hatched barrios on the fringe are not ranked."
+ranked = barrios[["nombre", "geometry"]].merge(
+    barrio_risk[["nombre", "exposed"]].assign(rank=np.arange(1, len(barrio_risk) + 1)),
+    on="nombre", how="left",
+)
+barrio_norm = quantile_norm(ranked.exposed)
+
+fig, ax = plt.subplots(figsize=(8, 6.6))
+plot.frame(ax, barrios.total_bounds, margin=0.02)
+plot.basemap(ax, dim=0.6)
+ranked.dropna(subset=["exposed"]).plot(
+    ax=ax, column="exposed", cmap=population_cmap, norm=barrio_norm,
+    edgecolor="white", linewidth=0.8, zorder=1,
+)
+ranked[ranked.exposed.isna()].plot(
+    ax=ax, facecolor="white", edgecolor=plot.MUTED, hatch="////", linewidth=0.5,
+    alpha=0.8, zorder=1,
+)
+for row in ranked[ranked["rank"] <= NUMBERED_BARRIOS].itertuples():
+    point = row.geometry.representative_point()
+    ax.annotate(f"{row.rank:.0f}", (point.x, point.y), ha="center", va="center",
+                fontsize=8, fontweight="semibold", color=plot.INK, zorder=5,
+                bbox={"boxstyle": "circle,pad=0.25", "fc": "white", "ec": plot.INK, "lw": 0.6})
+plot.scalebar(ax)
+plot.north_arrow(ax)
+bar = plot.colorbar_below(ax, plt.cm.ScalarMappable(barrio_norm, population_cmap),
+                          "Census residents in hotspots, per barrio",
+                          ticks=barrio_norm.boundaries, extend=barrio_norm.extend,
+                          fraction=0.035)
+count_ticks(bar)
+handles = [
+    Patch(facecolor="white", edgecolor=plot.MUTED, hatch="////",
+                      label=f"Fewer than {MIN_BARRIO_POPULATION} residents, not ranked"),
+]
+fig.legend(handles=handles, loc="outside lower center", fontsize=8)
+plot.suptitle(fig, "Most residents in hotspots live in barrios north and south of the center")
+plt.show()
+```
+
+The `{python} NUMBERED_BARRIOS` numbered barrios hold `{python} f"{numbered_share:.0f}"`% of the residents in the city's hotspots.
 
 ```{python}
 #| label: fig-barrios
@@ -1213,7 +1420,6 @@ top5_share = 100 * barrio_risk.exposed.head(5).sum() / barrio_risk.exposed.sum()
 #| fig-alt: "A ranked dot plot with barrio names down the left side. The first panel shows a gray dot for residents in hotspots and a violet dot for deprived residents in hotspots, joined by a line, with the largest counts at the top. The second panel shows each barrio's mean temperature as a dot colored on the temperature scale. The third panel shows canopy cover as green dots, mostly between 5 and 15 percent."
 top = barrio_risk.head(TOP_BARRIOS).iloc[::-1]
 y = np.arange(len(top))
-DEPRIVED_COLOR = "#6250d6"
 
 fig, (ax_p, ax_t, ax_c) = plt.subplots(1, 3, figsize=(10, 6.4), sharey=True,
                                        width_ratios=[2.2, 1, 1])
@@ -1398,7 +1604,6 @@ from lonboard import BitmapLayer, Map, PolygonLayer
 from lonboard.basemap import CartoStyle, MaplibreBasemap
 from lonboard.controls import FullscreenControl, NavigationControl, ScaleControl
 from PIL import Image
-from rasterio.features import shapes
 
 
 def png_data_uri(rgba):
@@ -1414,8 +1619,7 @@ def colorize(values, cmap, norm):
     return rgba
 
 
-city_transform = rasterio.windows.transform(city_win, GRID_TRANSFORM)
-map_bounds = list(rasterio.windows.bounds(city_win, GRID_TRANSFORM))
+map_bounds =list(rasterio.windows.bounds(city_win, GRID_TRANSFORM))
 lst_layer = BitmapLayer(
     image=png_data_uri(colorize(lst[city_rows, city_cols], plot.CMAP_LST, lst_norm)),
     bounds=map_bounds, opacity=0.85, pickable=False,

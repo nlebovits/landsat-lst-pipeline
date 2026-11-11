@@ -1,0 +1,1529 @@
+---
+title: "Extreme heat risk in Pergamino"
+subtitle: "Climate projections, surface heat, exposure, and vulnerability for a mid-sized Argentine city, from cloud-optimized open data"
+author:
+  - name: Nissim Lebovits
+  - name: Elizabeth Wesley
+    affiliation: World Resources Institute
+date: 2026-11-11
+description: >
+  A worked heat-risk assessment for Pergamino, Buenos Aires Province, that
+  reads only the pixels and rows it needs from Source Cooperative.
+format:
+  html:
+    code-fold: true
+    code-summary: "Show code"
+    toc: true
+    toc-depth: 2
+    # PNG at a fixed resolution keeps every figure under 500 KB. Quarto's
+    # default for HTML, retina, doubles the pixel count.
+    fig-format: png
+    fig-dpi: 110
+execute:
+  warning: false
+  freeze: auto
+jupyter: python3
+---
+
+This tutorial assesses extreme heat risk in [Pergamino](https://www.pergamino.gob.ar), a partido in the north of Buenos Aires Province, Argentina.
+It combines the hazard, exposure, and vulnerability framework with open data that you can query in place.
+Every layer except one comes from a cloud-optimized file on [Source Cooperative](https://source.coop/) or an open S3 bucket, and the code reads only the part that covers Pergamino.
+
+The [source of this page](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/docs/tutorials/pergamino.qmd) is a Quarto document.
+To run it yourself, install the documentation dependencies and start a live preview from the repository root:
+
+```bash
+uv sync --group docs
+uv run --group docs quarto preview docs/tutorials/pergamino.qmd
+```
+
+If you have not used the surface temperature product before, start with the [quickstart](/quickstart.qmd).
+The [known issues](/about/known-issues.qmd) page lists the limits of the data that this analysis inherits.
+
+## Introduction
+
+This tutorial answers four questions for Pergamino, and its code adapts to another city:
+
+- How many days above 35 °C does the climate record show, and how many do the models project?
+- Which parts of the city run hottest on hot days?
+- How much do tree canopy and buildings explain the pattern?
+- Who lives in the hottest places, and how many of them live in materially deprived households?
+
+The analysis ends with five recommendations that apply under every emissions scenario.
+The [sensable-heat web map](https://sensable-heat.vercel.app/) displays the same data, and you can browse its layers for any city.
+For the reasoning behind the product, listen to the [Great Data Products episode with Elizabeth Wesley](https://greatdataproducts.com/episodes/2026/09/wesley-heat-data/).
+
+| Dataset | Provider | Format | Resolution | Where to get it |
+|---|---|---|---|---|
+| P95 land surface temperature, 2021–2025 | This project, from USGS Landsat 8 and 9 | COG | 1 arc-second, about 30 m | [Source Cooperative](https://source.coop/nlebovits/landsat-lst) |
+| Partido, urban agglomerations, barrios | Municipalidad de Pergamino | GeoParquet, PMTiles | Vector | [Source Cooperative](https://source.coop/nlebovits/pergamino-ide) |
+| Days above 35 °C (`tx35`), CMIP6 | IPCC WGI Atlas, Copernicus C3S | NetCDF, with an extract in this repository | 1° | [Climate Data Store](https://cds.climate.copernicus.eu/datasets/projections-climate-atlas) |
+| Canopy height model v2 | Meta and the World Resources Institute | COG | 1.19 m | [Source Cooperative](https://source.coop/tge-labs/meta-chm-v2) |
+| GHS-POP R2023A, 2025 epoch | European Commission JRC | COG | 100 m | [Source Cooperative](https://source.coop/nlebovits/ghsl) |
+| Building footprints | Overture Maps Foundation | GeoParquet | Footprint | [Overture docs](https://docs.overturemaps.org/guides/buildings/) |
+| Census 2022: population and household deprivation | INDEC, with tract geometry from CONICET | GeoParquet, Parquet | Census tract | [Source Cooperative](https://source.coop/nlebovits/censo-argentino) |
+
+: The datasets this tutorial reads. {#tbl-datasets}
+
+### Set up
+
+The first cell loads the libraries and a small plotting module, [`docs/_plotting.py`](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/docs/_plotting.py).
+That module defines the figure style, the colormaps, and the dimmed imagery basemap that every map on this site shares.
+
+```{python}
+#| label: setup
+import io
+import json
+import math
+import sys
+import time
+import urllib.request
+import warnings
+from pathlib import Path
+
+import duckdb
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pystac
+import rasterio
+import shapely
+from affine import Affine
+from IPython.display import Markdown
+from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, LogNorm
+from rasterio.enums import Resampling
+from rasterio.features import rasterize
+from rasterio.warp import reproject, transform_bounds
+from rasterio.windows import Window, from_bounds
+from shapely.geometry import box
+
+# Quarto runs this notebook from its own folder or from the project root.
+# Look in both places for the docs folder, which holds _plotting.py.
+DOCS_DIR = next(
+    p
+    for p in [Path.cwd(), *Path.cwd().parents, Path.cwd() / "docs"]
+    if (p / "_plotting.py").exists()
+)
+sys.path.insert(0, str(DOCS_DIR))
+import _plotting as plot  # noqa: E402
+
+plot.apply_style()
+warnings.filterwarnings("ignore", message="Mean of empty slice")
+T0 = time.perf_counter()
+
+
+def n(x):
+    """A count with thousands separators."""
+    return f"{x:,.0f}"
+
+
+def md_table(df, floatfmt="{:,.1f}"):
+    """Render a DataFrame as a Markdown table, which Quarto styles natively."""
+    def cell(v):
+        if isinstance(v, float):
+            return floatfmt.format(v)
+        if isinstance(v, (int, np.integer)):
+            return f"{v:,}"
+        return str(v)
+
+    head = "| " + " | ".join(df.columns) + " |"
+    rule = "|" + "|".join("---" for _ in df.columns) + "|"
+    rows = ["| " + " | ".join(cell(v) for v in row) + " |" for row in df.itertuples(index=False)]
+    return Markdown("\n".join([head, rule, *rows]))
+```
+
+Every value you might want to change sits in the next cell.
+The defaults match the analysis this tutorial adapts, and a comment beside each one says what it controls.
+
+```{python}
+#| label: constants
+# Sources. Each file is cloud-optimized: the notebook reads only the rows,
+# columns, and pixel windows that cover Pergamino.
+LST_ITEM_URL = (
+    "https://data.source.coop/nlebovits/landsat-lst/"
+    "lst-p95-2021-2025/S30W065/S30W065.json"
+)
+IDE_URL = "https://data.source.coop/nlebovits/pergamino-ide"
+CENSUS_URL = "https://data.source.coop/nlebovits/censo-argentino/2022"
+GHSL_ITEMS_URL = "https://data.source.coop/nlebovits/ghsl/pop-2025/items.parquet"
+CHM_TILES_URL = "https://data.source.coop/tge-labs/meta-chm-v2/tiles.parquet"
+OVERTURE_STAC_URL = "https://stac.overturemaps.org/catalog.json"
+OVERTURE_RELEASE = "latest"  # or a release id such as "2026-10-21.0"
+TX35_PATH = DOCS_DIR / "tutorials" / "data" / "pergamino_tx35.parquet"
+
+# Hazard.
+BASELINE_YEARS = (1950, 2014)
+FUTURE_PERIODS = {
+    "2020-2050": (2020, 2050),
+    "2050-2070": (2050, 2070),
+    "2070-2100": (2070, 2100),
+}
+SCENARIOS = ["ssp126", "ssp245", "ssp585"]
+SPREAD_PERCENTILES = (10, 90)  # the band drawn around the ensemble median
+SMOOTH_YEARS = 11  # running mean applied to each model run before plotting
+HOTSPOT_PERCENTILE = 75  # a hotspot is hotter than this share of its class
+
+# Drivers.
+CANOPY_HEIGHT_M = 3  # a 1.19 m canopy cell at or above this height is canopy
+SUPERSAMPLE = 8  # building footprints rasterize at 1/8 of an LST pixel
+BIN_WIDTH = 5  # percentage points per bin in the driver chart
+MIN_BIN_PIXELS = 50  # a bin with fewer pixels gets no median
+
+# Exposure and vulnerability.
+DEPRIVED_IPMH_CATEGORIES = ("2", "3", "4")  # any material deprivation
+MIN_BARRIO_POPULATION = 100  # leave out barrios with fewer residents
+TOP_BARRIOS = 20  # barrios in the ranked chart
+
+# Maps.
+AREA_CRS = "EPSG:5347"  # POSGAR 2007 / Argentina 5, for areas in metres
+RURAL_PANELS = 2  # rural settlements shown in the hotspot figure
+DISPLAY_BLOCK = 5  # cover maps show means over 5 x 5 LST pixels
+
+# GDAL settings for reading COGs over HTTP with as few requests as possible.
+GDAL_ENV = {
+    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+    "GDAL_HTTP_MERGE_CONSECUTIVE_RANGES": "YES",
+    "GDAL_HTTP_MULTIPLEX": "YES",
+    "VSI_CACHE": "TRUE",
+}
+```
+
+## Study area
+
+Pergamino's municipal spatial data infrastructure publishes the boundaries this analysis needs, from the partido down to each barrio.
+The [IDE Pergamino mirror](https://source.coop/nlebovits/pergamino-ide) on Source Cooperative republishes every collection as GeoParquet.
+[DuckDB](https://duckdb.org/docs/stable/extensions/spatial/overview) reads each file over HTTP without downloading it.
+
+The urban agglomerations carry the municipality's own classification, which this analysis keeps:
+
+- **Urban** (`urbana`): the continuous built-up city.
+- **Peri-urban** (`periurbana`): the mixed fringe of the city, where houses, industry, and fields meet.
+- **Rural settlement** (`urbano en ruralidad`): the small towns scattered across the agricultural partido.
+
+```{python}
+#| label: study-area
+con = duckdb.connect()
+con.sql("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
+con.sql("SET s3_region = 'us-west-2'; SET enable_progress_bar = false;")
+
+
+def read_geoparquet(sql):
+    """Run a DuckDB query that returns WKB in `geometry`; return a GeoDataFrame."""
+    df = con.sql(sql).df()
+    geometry = gpd.GeoSeries.from_wkb(df.pop("geometry").apply(bytes), crs="EPSG:4326")
+    return gpd.GeoDataFrame(df, geometry=geometry)
+
+
+partido = read_geoparquet(f"""
+    SELECT departa AS name, ST_AsWKB(geometry) AS geometry
+    FROM '{IDE_URL}/limites/partido_pergamino/publico_partido_pergamino.parquet'
+""")
+aglomerados = read_geoparquet(f"""
+    SELECT id, clasificacion, distrito, ST_AsWKB(geometry) AS geometry
+    FROM '{IDE_URL}/limites/aglomerados_urbanos/publico_aglomerados_urbanos.parquet'
+""")
+barrios = read_geoparquet(f"""
+    SELECT id, nombre, ST_AsWKB(geometry) AS geometry
+    FROM '{IDE_URL}/limites/barrios/publico_barrios.parquet'
+""")
+
+URBAN_CLASSES = list(plot.URBAN_CLASS_COLORS)
+class_area_km2 = (
+    aglomerados.to_crs(AREA_CRS)
+    .assign(area=lambda d: d.area / 1e6)
+    .groupby("clasificacion")["area"]
+    .sum()
+    .reindex(URBAN_CLASSES)
+)
+partido_area_km2 = float(partido.to_crs(AREA_CRS).area.sum() / 1e6)
+urban_share = 100 * class_area_km2.sum() / partido_area_km2
+n_towns = aglomerados.query("clasificacion == 'urbano en ruralidad'").distrito.nunique()
+
+city = aglomerados[aglomerados.clasificacion != "urbano en ruralidad"]
+city_frame = city.total_bounds
+city_outline = gpd.GeoSeries([city.union_all()], crs="EPSG:4326").boundary
+```
+
+The partido covers `{python} n(partido_area_km2)` km², and the three urban classes cover `{python} f"{class_area_km2.sum():.0f}"` km² of it, or `{python} f"{urban_share:.1f}"`%.
+The city of Pergamino holds `{python} f"{class_area_km2['urbana']:.0f}"` km² of urban land, and `{python} n_towns` rural settlements add `{python} f"{class_area_km2['urbano en ruralidad']:.0f}"` km² more.
+The city's `{python} len(barrios)` barrios become the units of the summary in [Risk by barrio](#risk-by-barrio).
+
+```{python}
+#| label: fig-study-area
+#| fig-cap: "Pergamino's urban classes over greyscale satellite imagery. Left, the whole partido, with a frame around the city. Right, the city of Pergamino with its barrio boundaries. Source: Municipalidad de Pergamino via IDE Pergamino; imagery from Esri."
+#| fig-alt: "Two maps. The left map shows the large rural partido of Pergamino with a dark outline, a compact blue city near its center ringed by orange peri-urban patches, and small green rural towns scattered across the fields. The right map zooms into the city, showing blue urban land divided by thin black barrio boundaries and orange peri-urban land on its fringes."
+fig, (ax_p, ax_c) = plt.subplots(1, 2, figsize=(10, 5.4), width_ratios=[1, 1.05])
+for ax, bounds, zoom in [(ax_p, partido.total_bounds, 11), (ax_c, city_frame, 14)]:
+    plot.frame(ax, bounds, margin=0.03)
+    plot.basemap(ax, zoom=zoom, dim=0.5, credit=ax is ax_c)
+    for name, color in plot.URBAN_CLASS_COLORS.items():
+        aglomerados[aglomerados.clasificacion == name].plot(
+            ax=ax, facecolor=color, edgecolor=color, linewidth=0.6, alpha=0.55, zorder=2
+        )
+    partido.boundary.plot(ax=ax, color=plot.INK, linewidth=1.1, zorder=3)
+    plot.scalebar(ax)
+    plot.north_arrow(ax)
+barrios.boundary.plot(ax=ax_c, color=plot.INK, linewidth=0.45, zorder=4)
+x0, y0, x1, y1 = city_frame
+ax_p.add_patch(
+    plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor=plot.INK, lw=0.9, zorder=5)
+)
+ax_p.annotate("City of Pergamino", xy=(x1, y1), xytext=(6, 6), textcoords="offset points",
+              fontsize=8.5, color=plot.INK, zorder=6)
+ax_p.set_title("Partido de Pergamino")
+ax_c.set_title("City of Pergamino and its barrios")
+handles = [
+    plot.legend_patch(c, plot.URBAN_CLASS_LABELS[k], alpha=0.7)
+    for k, c in plot.URBAN_CLASS_COLORS.items()
+] + [
+    plot.legend_line(plot.INK, "Barrio boundary", 0.6),
+    plot.legend_line(plot.INK, "Partido boundary", 1.2),
+]
+fig.legend(handles=handles, loc="outside lower center", ncols=5, fontsize=8.5)
+plot.suptitle(fig, "Pergamino's urban land is one compact city and a scatter of small towns")
+plt.show()
+```
+
+## Climate projections: how hot will it get?
+
+Start with the climate record, because a local map makes sense only against a trend.
+A mayor already knows that summers are hot.
+A baseline count of extreme heat days, and the count the models project for the coming decades, turns that knowledge into a trajectory that a budget can plan against.
+The local analysis that follows then shows where in the city to act.
+
+The indicator is the number of days per year with a maximum temperature above 35 °C.
+The World Resources Institute's [Cool Cities Lab](https://coolcities.wri.org/) uses this threshold, above which sustained heat stress becomes dangerous.
+A count of days also maps onto an emergency protocol: you can set one to activate on such a day.
+
+::: {.callout-note}
+## Shared socioeconomic pathways
+
+Each Shared Socioeconomic Pathway (SSP) describes one possible future of emissions and development:
+
+- **SSP1-2.6, low emissions:** steep cuts in emissions, about 1.8 °C of warming by 2100.
+- **SSP2-4.5, intermediate emissions:** moderate mitigation, about 2.7 °C of warming by 2100.
+- **SSP5-8.5, high emissions:** continued dependence on fossil fuels, about 4.4 °C of warming by 2100.
+
+Nobody knows which path the world takes.
+A plan that holds under all three is more useful than a plan tuned to one.
+:::
+
+::: {.callout-important}
+## The one dataset in this repository
+
+The [IPCC WGI Interactive Atlas](https://interactive-atlas.ipcc.ch/) publishes `tx35` as global NetCDF files behind the Copernicus [Climate Data Store](https://cds.climate.copernicus.eu/datasets/projections-climate-atlas).
+Reading them requires a CDS account, an API key, and several hundred megabytes of downloads.
+Instead, the repository includes a small extract for Pergamino's grid cell, [`pergamino_tx35.parquet`](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/docs/tutorials/data/pergamino_tx35.parquet), along with the [script that made it](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/docs/tutorials/data/extract_tx35.py).
+The same folder stores the CDS [provenance records](https://github.com/nlebovits/landsat-lst-pipeline/tree/main/docs/tutorials/data/provenance) for the four downloads.
+To extract another city, download the four experiments with the CDS API and run the script with that city's coordinates.
+:::
+
+```{python}
+#| label: climate
+tx35 = pd.read_parquet(TX35_PATH)
+cell_lon, cell_lat = float(tx35.lon.iloc[0]), float(tx35.lat.iloc[0])
+
+# Annual totals per model run. A year with a missing month is left out.
+annual = (
+    tx35.groupby(["experiment", "member", "year"])["tx35"]
+    .agg(["sum", "count"])
+    .query("count == 12")["sum"]
+    .rename("days")
+    .reset_index()
+)
+annual = annual[annual.year >= BASELINE_YEARS[0]]
+n_members = annual.groupby("experiment").member.nunique()
+
+# The baseline is the ensemble median of each run's 1950-2014 mean.
+baseline_by_run = annual.query(
+    "experiment == 'historical' and year <= @BASELINE_YEARS[1]"
+).groupby("member").days.mean()
+baseline_days = float(baseline_by_run.median())
+
+rows = []
+for scenario in SCENARIOS:
+    runs = annual[annual.experiment == scenario]
+    for period, (start, end) in FUTURE_PERIODS.items():
+        by_run = runs[runs.year.between(start, end)].groupby("member").days.mean()
+        low, high = np.percentile(by_run, SPREAD_PERCENTILES)
+        median = float(by_run.median())
+        rows.append({
+            "scenario": scenario, "period": period, "median": median,
+            "low": low, "high": high, "change": median - baseline_days,
+            "change_pct": 100 * (median - baseline_days) / baseline_days,
+        })
+proj = pd.DataFrame(rows).set_index(["scenario", "period"])
+
+
+def projected(scenario, period, column="median"):
+    return proj.loc[(scenario, period), column]
+```
+
+The extract holds the 1° grid cell centered on `{python} f"{abs(cell_lat):.1f}"`° S, `{python} f"{abs(cell_lon):.1f}"`° W, which covers the city.
+It contains every run in the Atlas ensemble: `{python} n_members["historical"]` historical runs and `{python} n_members[SCENARIOS].min()` to `{python} n_members[SCENARIOS].max()` runs per scenario.
+The code sums each run's monthly counts into annual totals, then takes the median across runs.
+The median resists the few models that run far hotter or cooler than the rest, and the band shows how far they spread.
+
+```{python}
+#| label: fig-climate
+#| fig-cap: "Days per year above 35 °C in Pergamino's grid cell, one panel per emissions scenario. Lines show the ensemble median of each run's running mean; shaded bands show the spread across runs. Horizontal segments mark the median of each future period. Source: IPCC WGI Atlas, CMIP6, via the Copernicus Climate Data Store."
+#| fig-alt: "Three line charts side by side, one each for SSP1-2.6, SSP2-4.5 and SSP5-8.5. Each shows a gray historical line near the baseline from 1950 to 2014, then a colored scenario line with a wide shaded band of model spread. The low and intermediate scenarios rise moderately and level off, while the high-emissions scenario climbs steeply toward 2100. Short black segments with numbers mark the median for 2020 to 2050, 2050 to 2070, and 2070 to 2100."
+def ensemble_band(experiment):
+    """Median and spread across runs of each run's smoothed annual count."""
+    wide = annual[annual.experiment == experiment].pivot(
+        index="year", columns="member", values="days"
+    )
+    smooth = wide.rolling(SMOOTH_YEARS, center=True, min_periods=SMOOTH_YEARS // 2 + 1).mean()
+    low, high = np.nanpercentile(smooth, SPREAD_PERCENTILES, axis=1)
+    return smooth.index.to_numpy(), smooth.median(axis=1).to_numpy(), low, high
+
+
+bands = {e: ensemble_band(e) for e in ["historical", *SCENARIOS]}
+high_ratio = projected("ssp585", "2070-2100") / baseline_days
+
+fig, axes = plt.subplots(1, 3, figsize=(10, 4.4), sharey=True)
+for ax, scenario in zip(axes, SCENARIOS, strict=True):
+    for experiment in ["historical", scenario]:
+        color = plot.SCENARIO_COLORS[experiment]
+        years, median, low, high = bands[experiment]
+        ax.fill_between(years, low, high, color=color, alpha=0.16, linewidth=0, zorder=1)
+        ax.plot(years, median, color=color, lw=2, zorder=3)
+    ax.axhline(baseline_days, color=plot.MUTED, lw=0.9, zorder=2)
+    for period, (start, end) in FUTURE_PERIODS.items():
+        value = projected(scenario, period)
+        ax.hlines(value, start, end, color=plot.INK, lw=1.2, zorder=4)
+        ax.text((start + end) / 2, value + 3, f"{value:.0f}", ha="center", va="bottom",
+                fontsize=8.5, color=plot.INK, zorder=5,
+                bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.8})
+    ax.set_title(plot.SCENARIO_LABELS[scenario])
+    ax.set_xlim(1950, 2100)
+    ax.set_xticks([1950, 2000, 2050, 2100])
+    ax.grid(axis="y")
+    ax.spines["left"].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+axes[0].set_ylim(0, None)
+axes[0].set_ylabel("Days per year above 35 °C")
+axes[0].text(1952, baseline_days - 2.5, f"Baseline {baseline_days:.0f}", fontsize=8.5,
+             color=plot.INK_SECONDARY, va="top")
+lo_pct, hi_pct = SPREAD_PERCENTILES
+handles = [
+    plot.legend_line(plot.SCENARIO_COLORS["historical"], "Historical runs, median", 2),
+    plot.legend_patch(plot.SCENARIO_COLORS["historical"],
+                      f"{lo_pct}th to {hi_pct}th percentile of runs", 0.25),
+    plot.legend_line(plot.INK, "Median of a future period", 1.2),
+    plot.legend_line(plot.MUTED, "1950–2014 baseline", 0.9),
+]
+fig.legend(handles=handles, loc="outside lower center", ncols=4, fontsize=8)
+plot.suptitle(
+    fig,
+    f"Hot days rise under every scenario, to {high_ratio:.1f} times the baseline under SSP5-8.5",
+)
+plt.show()
+```
+
+```{python}
+#| label: tbl-projections
+#| tbl-cap: "Median days per year above 35 °C across model runs, with the spread across runs and the change from the 1950–2014 baseline."
+table = proj.reset_index().assign(
+    Scenario=lambda d: d.scenario.map(plot.SCENARIO_LABELS),
+    Period=lambda d: d.period.str.replace("-", "–"),
+    Days=lambda d: d["median"].round(0),
+    Spread=lambda d: [f"{a:.0f}–{b:.0f}" for a, b in zip(d.low, d.high, strict=True)],
+    Change=lambda d: [f"{c:+.0f} ({p:+.0f}%)" for c, p in zip(d.change, d.change_pct, strict=True)],
+)[["Scenario", "Period", "Days", "Spread", "Change"]]
+table.columns = [
+    "Scenario", "Period", "Median days",
+    f"{lo_pct}th–{hi_pct}th percentile of runs", "Change from baseline",
+]
+md_table(table, floatfmt="{:.0f}")
+```
+
+From 1950 to 2014, the median model run counts `{python} f"{baseline_days:.0f}"` days above 35 °C a year in Pergamino's grid cell.
+Under the intermediate scenario, SSP2-4.5, the median rises to `{python} f"{projected('ssp245', '2020-2050'):.0f}"` days for 2020–2050, `{python} f"{projected('ssp245', '2050-2070'):.0f}"` for 2050–2070, and `{python} f"{projected('ssp245', '2070-2100'):.0f}"` for 2070–2100.
+Even the low-emissions path adds `{python} f"{projected('ssp126', '2070-2100', 'change'):.0f}"` days a year by the end of the century.
+The high-emissions path adds `{python} f"{projected('ssp585', '2070-2100', 'change'):.0f}"`.
+
+The spread between runs is wide.
+For 2070–2100 under SSP2-4.5, the middle 80% of runs range from `{python} f"{projected('ssp245', '2070-2100', 'low'):.0f}"` to `{python} f"{projected('ssp245', '2070-2100', 'high'):.0f}"` days.
+That range is a reason to plan for several futures at once, which the [recommendations](#recommendations) do.
+
+## Current heat patterns: where is it hottest now?
+
+The projections say how much heat is coming.
+The next question is where, inside the city, it lands hardest.
+This section moves from a 1° climate grid, about 100 km across, to a 30 m satellite grid that resolves single blocks and parks.
+
+The [P95 land surface temperature composite](https://source.coop/nlebovits/landsat-lst) takes the upper percentile, P95, of every clear Landsat 8 and 9 observation from 2021 through 2025.
+Before the percentile, the pipeline removes each scene's bulk offset from its monthly normal, then blends overlapping orbital paths to remove stripes.
+The [repository README](https://github.com/nlebovits/landsat-lst-pipeline#data-processing-storage-and-access) describes both steps, and the STAC item's `processing:lineage` field records them for each tile.
+The result shows where the ground runs hottest on hot days, relative to its surroundings.
+
+::: {.callout-important}
+## Surface temperature is not air temperature
+
+Land surface temperature measures how hot the ground and roofs get, not the air a person breathes.
+On a hot afternoon, a dark roof can run 20 °C or more above the air around it.
+Read the composite as a relative indicator that ranks places by how much heat their ground and roofs absorb.
+It does not predict the heat stress a person feels.
+:::
+
+The tile `S30W065` covers 5° by 5°, far more than Pergamino needs.
+`rasterio` reads only the window over the partido, plus the matching window of `qa_count`, the per-month count of clear observations behind each percentile.
+
+```{python}
+#| label: lst
+item = pystac.Item.from_file(LST_ITEM_URL)
+band = item.assets["lst_p95"].extra_fields["bands"][0]
+LST_SCALE, LST_OFFSET = band["raster:scale"], band["raster:offset"]
+
+# The analysis grid is the LST grid, cut to the partido plus about 1 km.
+pad = 0.01
+px0, py0, px1, py1 = partido.total_bounds
+AOI_BOUNDS = (px0 - pad, py0 - pad, px1 + pad, py1 + pad)
+
+with rasterio.Env(**GDAL_ENV):
+    with rasterio.open(item.assets["lst_p95"].get_absolute_href()) as src:
+        window = from_bounds(*AOI_BOUNDS, transform=src.transform)
+        window = window.round_offsets().round_lengths()
+        GRID_TRANSFORM = src.window_transform(window)
+        GRID_CRS = src.crs
+        lst_dn = src.read(1, window=window)
+    with rasterio.open(item.assets["qa_count"].get_absolute_href()) as src:
+        qa_monthly = src.read(window=window)
+GRID_SHAPE = lst_dn.shape
+GRID_EXTENT = (
+    GRID_TRANSFORM.c,
+    GRID_TRANSFORM.c + GRID_TRANSFORM.a * GRID_SHAPE[1],
+    GRID_TRANSFORM.f + GRID_TRANSFORM.e * GRID_SHAPE[0],
+    GRID_TRANSFORM.f,
+)
+lst = np.where(lst_dn == 0, np.nan, lst_dn * LST_SCALE + LST_OFFSET).astype("float32")
+qa_total = qa_monthly.sum(axis=0, dtype="int32")
+
+# A pixel on a geographic grid shrinks east-west with latitude. Its area, in
+# square metres, converts population densities into counts later on.
+lat_centres = GRID_TRANSFORM.f + (np.arange(GRID_SHAPE[0]) + 0.5) * GRID_TRANSFORM.e
+pixel_w_m = abs(GRID_TRANSFORM.a) * plot.METRES_PER_DEGREE * np.cos(np.radians(lat_centres))
+pixel_h_m = abs(GRID_TRANSFORM.e) * plot.METRES_PER_DEGREE
+PIXEL_AREA_M2 = np.repeat((pixel_w_m * pixel_h_m)[:, None], GRID_SHAPE[1], axis=1)
+
+
+def burn(shapes, dtype="uint8"):
+    """Rasterize (geometry, value) pairs onto the analysis grid, by pixel centre."""
+    return rasterize(shapes, out_shape=GRID_SHAPE, transform=GRID_TRANSFORM, fill=0, dtype=dtype)
+
+
+def grid_window(bounds):
+    """The window of the analysis grid that covers bounds, rounded outward."""
+    win = from_bounds(*bounds, transform=GRID_TRANSFORM)
+    c0, r0 = math.floor(win.col_off), math.floor(win.row_off)
+    c1 = math.ceil(win.col_off + win.width)
+    r1 = math.ceil(win.row_off + win.height)
+    return Window(c0, r0, c1 - c0, r1 - r0)
+
+
+class_codes = {name: i + 1 for i, name in enumerate(URBAN_CLASSES)}
+urban_class = burn(
+    (g, class_codes[c])
+    for g, c in zip(aglomerados.geometry, aglomerados.clasificacion, strict=True)
+)
+in_urban = urban_class > 0
+in_partido = burn([(partido.geometry.iloc[0], 1)]).astype(bool)
+min_obs_urban = int(qa_total[in_urban].min())
+median_obs_urban = float(np.median(qa_total[in_urban]))
+lst_partido_median = float(np.nanmedian(lst[in_partido]))
+lst_class_median = {c: float(np.nanmedian(lst[urban_class == class_codes[c]])) for c in URBAN_CLASSES}
+```
+
+The read fetches part of a `{python} f"{item.assets['lst_p95'].extra_fields['file:size'] / 1e6:.0f}"` MB file.
+The window holds `{python} f"{GRID_SHAPE[0]:,} × {GRID_SHAPE[1]:,}"` pixels, each about `{python} f"{pixel_w_m.mean():.0f}"` m wide and `{python} f"{pixel_h_m:.0f}"` m tall at this latitude.
+Every pixel inside the urban classes has a value.
+The thinnest evidence behind any of them is `{python} min_obs_urban` clear observations, and the median is `{python} f"{median_obs_urban:.0f}"`.
+The product requires at least five.
+
+### Hotspots by urban class
+
+One threshold for the whole partido would flag mostly farmland.
+The median pixel in the partido reaches `{python} f"{lst_partido_median:.1f}"` °C, against `{python} f"{lst_class_median['urbana']:.1f}"` °C in the city.
+Bare fields after harvest run hotter than most streets, and they have almost no residents.
+The question here is where heat and people meet.
+
+For that reason, the analysis sets one threshold per urban class: the `{python} HOTSPOT_PERCENTILE`th percentile of that class's own pixels.
+A hotspot in the urban core and a hotspot in a rural town can differ by a degree or more, yet each marks the hottest `{python} 100 - HOTSPOT_PERCENTILE`% of its own setting.
+Treat this rule as a heuristic, and check it against what local staff know about each place.
+
+```{python}
+#| label: tbl-classes
+#| tbl-cap: "Surface temperature and hotspot thresholds by urban class."
+thresholds = {}
+hotspot = np.zeros(GRID_SHAPE, dtype=bool)
+for name, code in class_codes.items():
+    in_class = (urban_class == code) & np.isfinite(lst)
+    thresholds[name] = float(np.percentile(lst[in_class], HOTSPOT_PERCENTILE))
+    hotspot |= in_class & (lst >= thresholds[name])
+
+table = pd.DataFrame({
+    "Urban class": [plot.URBAN_CLASS_LABELS[c] for c in URBAN_CLASSES],
+    "Area (km²)": class_area_km2.to_numpy(),
+    "Median P95 LST (°C)": [lst_class_median[c] for c in URBAN_CLASSES],
+    "Hotspot threshold (°C)": [thresholds[c] for c in URBAN_CLASSES],
+    "Median clear observations": [
+        float(np.median(qa_total[urban_class == class_codes[c]])) for c in URBAN_CLASSES
+    ],
+})
+md_table(table)
+```
+
+```{python}
+#| label: fig-lst
+#| fig-cap: "Left, the 95th percentile land surface temperature for 2021–2025 around the city of Pergamino, with the urban and peri-urban classes outlined in white. Right, the number of clear observations behind each pixel. Source: Landsat LST P95 composite on Source Cooperative."
+#| fig-alt: "Two maps of the city of Pergamino. The left map uses a dark purple to pale yellow scale for temperature. The built-up core and the river corridor appear dark and cool, while surrounding fields and open lots at the city's edge appear bright and hot. The right map shows observation counts, lowest in the city center and highest toward the west."
+def stepped_norm(values, step, cmap):
+    """A color scale in fixed steps spanning the 2nd to 98th percentile."""
+    lo, hi = np.nanpercentile(values, [2, 98])
+    edges = np.arange(np.floor(lo / step) * step, np.ceil(hi / step) * step + step / 2, step)
+    return BoundaryNorm(edges, plt.get_cmap(cmap).N, extend="both")
+
+
+city_win = grid_window(city_frame)
+city_rows, city_cols = city_win.toslices()
+in_city_frame = np.zeros(GRID_SHAPE, dtype=bool)
+in_city_frame[city_rows, city_cols] = True
+lst_norm = stepped_norm(lst[in_city_frame], 0.5, plot.CMAP_LST)
+obs_norm = stepped_norm(qa_total[in_city_frame], 20, plot.CMAP_OBSERVATIONS)
+
+fig, (ax_l, ax_q) = plt.subplots(1, 2, figsize=(10, 4.9))
+im = ax_l.imshow(lst, extent=GRID_EXTENT, cmap=plot.CMAP_LST, norm=lst_norm, zorder=1)
+qm = ax_q.imshow(qa_total, extent=GRID_EXTENT, cmap=plot.CMAP_OBSERVATIONS, norm=obs_norm,
+                 zorder=1)
+for ax in (ax_l, ax_q):
+    plot.frame(ax, city_frame, margin=0.01)
+    city_outline.plot(ax=ax, color="white", linewidth=0.7, zorder=3)
+    plot.scalebar(ax)
+plot.north_arrow(ax_q)
+plot.colorbar_below(ax_l, im, "95th percentile land surface temperature (°C)",
+                    ticks=lst_norm.boundaries[::2], extend="both")
+plot.colorbar_below(ax_q, qm, "Clear observations behind the percentile, 2021–2025",
+                    ticks=obs_norm.boundaries[::2], extend="both")
+ax_l.set_title("Hot-season surface temperature")
+ax_q.set_title("Evidence behind each pixel")
+plot.suptitle(fig, "Open ground around the city runs hotter than the built-up core")
+plt.show()
+```
+
+The built-up core and the tree-lined Arroyo Pergamino run coolest.
+Fields and open lots outside the city show the highest values in the frame.
+Inside the urban classes, the hottest pixels line the city's fringe, where new subdivisions, vacant lots, and industrial yards leave ground exposed.
+
+The core also has the fewest clear observations.
+Every pixel there still has many times the five-observation minimum, enough for a stable percentile.
+
+```{python}
+#| label: fig-hotspots
+#| fig-cap: "Hotspots, the pixels hotter than their class's threshold, over greyscale imagery. One panel each for the urban and peri-urban classes, and one for each of the two largest rural settlements. Source: Landsat LST P95 composite; Municipalidad de Pergamino; imagery from Esri."
+#| fig-alt: "Four maps. The large left map shows the urban class in light blue with magenta hotspot patches concentrated along the city's northern, eastern and southern edges and a few in the interior. A top-right map shows small orange peri-urban patches around the city, many partly magenta. Two small bottom-right maps show rural towns in green with magenta hotspot patches on their edges."
+def square_bounds(geom_projected, side_m):
+    """Degree bounds of a square, at least side_m wide, centred on a geometry."""
+    x0, y0, x1, y1 = geom_projected.bounds
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    half = max(side_m, x1 - x0, y1 - y0) * 0.55
+    square = gpd.GeoSeries([box(cx - half, cy - half, cx + half, cy + half)], crs=AREA_CRS)
+    return square.to_crs("EPSG:4326").total_bounds
+
+
+def hotspot_panel(ax, name, bounds, title, margin=0.02):
+    code = class_codes[name]
+    plot.frame(ax, bounds, margin=margin)
+    plot.basemap(ax, dim=0.45, credit=False)
+    in_class = np.where(urban_class == code, 1.0, np.nan)
+    hot = np.where(hotspot & (urban_class == code), 1.0, np.nan)
+    ax.imshow(in_class, extent=GRID_EXTENT, alpha=0.4, zorder=1,
+              cmap=plot.single_color_cmap(plot.URBAN_CLASS_COLORS[name]))
+    ax.imshow(hot, extent=GRID_EXTENT, zorder=2, cmap=plot.single_color_cmap(plot.HOTSPOT_COLOR))
+    ax.set_title(title, fontsize=9.5)
+    plot.scalebar(ax)
+
+
+rural = aglomerados[aglomerados.clasificacion == "urbano en ruralidad"]
+largest_towns = (
+    rural.to_crs(AREA_CRS)
+    .assign(area=lambda d: d.area)
+    .dissolve("distrito", aggfunc="sum")
+    .sort_values("area", ascending=False)
+    .head(RURAL_PANELS)
+)
+
+fig = plt.figure(figsize=(10, 6.4))
+grid = fig.add_gridspec(2, 2 + RURAL_PANELS)
+ax_u = fig.add_subplot(grid[:, 0:2])
+hotspot_panel(ax_u, "urbana", city[city.clasificacion == "urbana"].total_bounds,
+              f"Urban, threshold {thresholds['urbana']:.1f} °C")
+ax_pu = fig.add_subplot(grid[0, 2:])
+hotspot_panel(ax_pu, "periurbana", city_frame,
+              f"Peri-urban, threshold {thresholds['periurbana']:.1f} °C")
+for i, (town, row) in enumerate(largest_towns.iterrows()):
+    ax = fig.add_subplot(grid[1, 2 + i])
+    hotspot_panel(ax, "urbano en ruralidad", square_bounds(row.geometry, 3000),
+                  f"{town}, rural, {thresholds['urbano en ruralidad']:.1f} °C", margin=0)
+plot.north_arrow(ax_u)
+handles = [
+    plot.legend_patch(plot.HOTSPOT_COLOR, f"Hotspot: hottest {100 - HOTSPOT_PERCENTILE}% of its class"),
+    *[
+        plot.legend_patch(c, f"{plot.URBAN_CLASS_LABELS[k]}, below threshold", 0.5)
+        for k, c in plot.URBAN_CLASS_COLORS.items()
+    ],
+]
+fig.legend(handles=handles, loc="outside lower center", ncols=4, fontsize=8)
+plot.suptitle(fig, "Each class has its own hotspots, most of them on the edges of built-up land")
+plt.show()
+```
+
+## What drives the heat
+
+A hotspot map shows where to act.
+Canopy and buildings suggest what to do there.
+Shade from trees cools the ground beneath it, while a roof's temperature depends on its material and color.
+This section measures both at the scale of the LST pixel.
+
+- **Canopy cover** is the share of each pixel where the [Meta and WRI canopy height model](https://source.coop/tge-labs/meta-chm-v2) reports trees at least `{python} CANOPY_HEIGHT_M` m tall. The model maps height at 1.19 m, which gives several hundred canopy cells per LST pixel.
+- **Building cover** is the share of each pixel under an [Overture Maps](https://docs.overturemaps.org/guides/buildings/) building footprint.
+
+Both layers come from global, openly licensed sources, which lets you repeat the analysis in any city.
+The code reads them only inside the urban classes.
+Each separate piece of urban land becomes one small window, which keeps the rural settlements from pulling in the whole partido.
+
+```{python}
+#| label: buildings
+with urllib.request.urlopen(OVERTURE_STAC_URL) as response:
+    overture_release = (
+        json.load(response)["latest"] if OVERTURE_RELEASE == "latest" else OVERTURE_RELEASE
+    )
+
+# Filter on the bounding box of the urban classes in DuckDB, then clip locally.
+ux0, uy0, ux1, uy1 = aglomerados.total_bounds
+buildings = read_geoparquet(f"""
+    SELECT id, ST_AsWKB(geometry) AS geometry
+    FROM read_parquet('s3://overturemaps-us-west-2/release/{overture_release}/theme=buildings/type=building/*.parquet')
+    WHERE bbox.xmin <= {ux1} AND bbox.xmax >= {ux0}
+      AND bbox.ymin <= {uy1} AND bbox.ymax >= {uy0}
+""")
+buildings = buildings[buildings.intersects(aglomerados.union_all())].reset_index(drop=True)
+```
+
+```{python}
+#| label: cover
+WEB_MERCATOR_ORIGIN = -20037508.342789244
+
+chm_tiles = con.sql(f"""
+    SELECT quadkey, cog_url
+    FROM '{CHM_TILES_URL}'
+    WHERE bbox.xmin <= {ux1} AND bbox.xmax >= {ux0}
+      AND bbox.ymin <= {uy1} AND bbox.ymax >= {uy0}
+""").df()
+
+# One window per separate piece of urban land, grown by 60 m.
+pieces = aglomerados.to_crs(AREA_CRS).buffer(60).union_all()
+pieces = gpd.GeoSeries(list(pieces.geoms), crs=AREA_CRS).to_crs("EPSG:4326")
+
+
+def building_cover(win):
+    """Share of each pixel in win under a building footprint."""
+    fine = rasterio.windows.transform(win, GRID_TRANSFORM) * Affine.scale(1 / SUPERSAMPLE)
+    bounds = rasterio.windows.bounds(win, GRID_TRANSFORM)
+    footprints = buildings.geometry[buildings.intersects(box(*bounds))]
+    if footprints.empty:
+        return np.zeros((win.height, win.width), dtype="float32")
+    shape = (win.height * SUPERSAMPLE, win.width * SUPERSAMPLE)
+    mask = rasterize(footprints, out_shape=shape, transform=fine, fill=0, dtype="uint8")
+    return mask.reshape(win.height, SUPERSAMPLE, win.width, SUPERSAMPLE).mean(axis=(1, 3))
+
+
+def canopy_cover(win, sources):
+    """Share of each pixel in win with canopy at least CANOPY_HEIGHT_M tall."""
+    bounds = rasterio.windows.bounds(win, GRID_TRANSFORM)
+    x0, y0, x1, y1 = transform_bounds("EPSG:4326", "EPSG:3857", *bounds)
+    res = sources[0].res[0]
+    # The canopy tiles share one global Web Mercator pixel grid, which turns
+    # a mosaic of several tiles into array slicing.
+    c0 = math.floor((x0 - WEB_MERCATOR_ORIGIN) / res)
+    r0 = math.floor((-WEB_MERCATOR_ORIGIN - y1) / res)
+    c1 = math.ceil((x1 - WEB_MERCATOR_ORIGIN) / res)
+    r1 = math.ceil((-WEB_MERCATOR_ORIGIN - y0) / res)
+    mosaic = np.full((r1 - r0, c1 - c0), np.nan, dtype="float32")
+    for src in sources:
+        tc = round((src.transform.c - WEB_MERCATOR_ORIGIN) / res)
+        tr = round((-WEB_MERCATOR_ORIGIN - src.transform.f) / res)
+        cc0, rr0 = max(c0, tc), max(r0, tr)
+        cc1, rr1 = min(c1, tc + src.width), min(r1, tr + src.height)
+        if cc0 >= cc1 or rr0 >= rr1:
+            continue
+        heights = src.read(1, window=Window(cc0 - tc, rr0 - tr, cc1 - cc0, rr1 - rr0))
+        mosaic[rr0 - r0 : rr1 - r0, cc0 - c0 : cc1 - c0] = heights >= CANOPY_HEIGHT_M
+    out = np.full((win.height, win.width), np.nan, dtype="float32")
+    origin = Affine(res, 0, WEB_MERCATOR_ORIGIN + c0 * res, 0, -res, -WEB_MERCATOR_ORIGIN - r0 * res)
+    reproject(
+        mosaic, out,
+        src_transform=origin, src_crs="EPSG:3857", src_nodata=np.nan,
+        dst_transform=rasterio.windows.transform(win, GRID_TRANSFORM), dst_crs=GRID_CRS,
+        dst_nodata=np.nan, resampling=Resampling.average,
+    )
+    return out
+
+
+building_share = np.full(GRID_SHAPE, np.nan, dtype="float32")
+canopy_share = np.full(GRID_SHAPE, np.nan, dtype="float32")
+with rasterio.Env(**GDAL_ENV):
+    sources = [rasterio.open(url) for url in chm_tiles.cog_url]
+    chm_tile_px = sources[0].width
+    try:
+        for piece in pieces:
+            win = grid_window(piece.bounds)
+            rows, cols = win.toslices()
+            building_share[rows, cols] = building_cover(win)
+            canopy_share[rows, cols] = canopy_cover(win, sources)
+    finally:
+        for src in sources:
+            src.close()
+building_share[~in_urban] = np.nan
+canopy_share[~in_urban] = np.nan
+```
+
+The urban classes span `{python} len(chm_tiles)` canopy tiles, each a COG `{python} f"{chm_tile_px:,}"` pixels on a side.
+The code reads `{python} len(pieces)` small windows from them rather than the tiles themselves.
+DuckDB returns `{python} n(len(buildings))` buildings inside the urban classes from Overture release `{python} overture_release`.
+
+```{python}
+#| label: fig-cover
+#| fig-cap: "Canopy cover, left, and building footprint cover, right, inside Pergamino's urban and peri-urban classes. Each square averages a block of LST pixels, set by `DISPLAY_BLOCK`. Sources: Meta and WRI canopy height model v2; Overture Maps buildings; imagery from Esri."
+#| fig-alt: "Two maps of the city. The left map shades canopy cover in greens, patchy across the city with the darkest greens in small areas on the fringe and in parks. The right map shades building cover in purples, darkest in a compact block at the city center and fading toward the edges."
+def block_mean(values, win, k=DISPLAY_BLOCK):
+    """Mean of each k by k block inside win, ignoring NaN, with its plot extent."""
+    rows, cols = win.toslices()
+    sub = values[rows, cols]
+    h, w = (sub.shape[0] // k) * k, (sub.shape[1] // k) * k
+    out = np.nanmean(sub[:h, :w].reshape(h // k, k, w // k, k), axis=(1, 3))
+    left, top = GRID_TRANSFORM * (win.col_off, win.row_off)
+    right, bottom = GRID_TRANSFORM * (win.col_off + w, win.row_off + h)
+    return out, (left, right, bottom, top)
+
+
+def truncated(cmap, start=0.12):
+    """A sequential colormap whose lowest value is a visible tint, not white."""
+    base = plt.get_cmap(cmap)
+    return LinearSegmentedColormap.from_list(f"{cmap}_t", base(np.linspace(start, 1, 256)))
+
+
+cover_norm = BoundaryNorm(np.arange(0, 60, 10), 256, extend="max")
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.9))
+for ax, share, cmap, label, title in [
+    (axes[0], canopy_share, plot.CMAP_CANOPY,
+     f"Canopy at least {CANOPY_HEIGHT_M} m tall (% of area)", "Tree canopy"),
+    (axes[1], building_share, plot.CMAP_BUILDINGS, "Building footprint (% of area)", "Buildings"),
+]:
+    plot.frame(ax, city_frame, margin=0.01)
+    plot.basemap(ax, dim=0.6, credit=ax is axes[1])
+    blocks, extent = block_mean(100 * share, city_win)
+    im = ax.imshow(blocks, extent=extent, cmap=truncated(cmap), norm=cover_norm, zorder=1)
+    city_outline.plot(ax=ax, color=plot.INK, linewidth=0.5, zorder=3)
+    plot.scalebar(ax)
+    plot.colorbar_below(ax, im, label, ticks=cover_norm.boundaries)
+    ax.set_title(title)
+plot.north_arrow(axes[1])
+plot.suptitle(fig, "Buildings fill the core; the densest canopy sits in patches near the edge")
+plt.show()
+```
+
+```{python}
+#| label: drivers
+valid = in_urban & np.isfinite(lst) & np.isfinite(canopy_share)
+drivers = pd.DataFrame({
+    "lst": lst[valid],
+    "canopy": 100 * canopy_share[valid],
+    "buildings": 100 * building_share[valid],
+})
+
+
+def median_lst(column, lo, hi):
+    """Median LST of pixels whose cover lies in [lo, hi) percent."""
+    return float(drivers.lst[(drivers[column] >= lo) & (drivers[column] < hi)].median())
+
+
+bare = (drivers.canopy < 5) & (drivers.buildings < 5)
+bare_share = 100 * bare.mean()
+bare_lst = float(drivers.lst[bare].median())
+covered_lst = float(drivers.lst[~bare].median())
+canopy_low, canopy_high = median_lst("canopy", 0, 5), median_lst("canopy", 30, 101)
+roof_mid, roof_full = median_lst("buildings", 30, 70), median_lst("buildings", 90, 101)
+rho = drivers.corr(method="spearman")
+
+# One least-squares fit with both covers, in °C per 10 percentage points.
+design = np.column_stack([np.ones(len(drivers)), drivers.canopy / 10, drivers.buildings / 10])
+coef, *_ = np.linalg.lstsq(design, drivers.lst, rcond=None)
+residual = drivers.lst - design @ coef
+r2 = 1 - (residual**2).sum() / ((drivers.lst - drivers.lst.mean()) ** 2).sum()
+```
+
+```{python}
+#| label: fig-drivers
+#| fig-cap: "Each urban pixel's 95th percentile LST against its canopy cover, left, and building cover, right. Gray hexagons count pixels on a log scale; colored lines join the median LST of each bin of cover with enough pixels for a stable median. Sources: Landsat LST P95 composite; Meta and WRI canopy height model v2; Overture Maps buildings."
+#| fig-alt: "Two hexbin scatter plots with temperature on the vertical axis. In both, a dense column of pixels sits at zero cover. The green canopy line drops by about a degree from zero cover to a few percent, then declines slowly. The purple building line also drops from zero cover, flattens across the middle, and rises again above about 80 percent cover."
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.6), sharey=True)
+lst_lo, lst_hi = np.percentile(drivers.lst, [0.5, 99.5])
+handles = []
+for ax, column, cmap, label in [
+    (axes[0], "canopy", plot.CMAP_CANOPY, f"Canopy at least {CANOPY_HEIGHT_M} m tall (% of pixel)"),
+    (axes[1], "buildings", plot.CMAP_BUILDINGS, "Building footprint (% of pixel)"),
+]:
+    hb = ax.hexbin(drivers[column], drivers.lst, gridsize=(40, 30),
+                   extent=(0, 100, lst_lo, lst_hi), cmap=truncated("Greys", 0.08),
+                   norm=LogNorm(), mincnt=1, linewidths=0.2, edgecolors="face", zorder=1)
+    bins = np.arange(0, 100 + BIN_WIDTH, BIN_WIDTH)
+    grouped = drivers.groupby(pd.cut(drivers[column], bins, include_lowest=True), observed=True)
+    stats = grouped.lst.agg(["median", "size"]).query("size >= @MIN_BIN_PIXELS")
+    centres = np.array([iv.mid for iv in stats.index])
+    color = plt.get_cmap(cmap)(0.8)
+    ax.plot(centres, stats["median"], color=color, lw=2, zorder=3)
+    ax.scatter(centres, stats["median"], s=22, color=color, edgecolor="white", lw=1, zorder=4)
+    handles.append(plot.legend_line(color, f"Median LST per {BIN_WIDTH}-point bin of {column}", 2))
+    ax.set_xlabel(label)
+    ax.set_xlim(0, 100)
+    ax.grid(axis="y")
+axes[0].set_ylabel("95th percentile LST (°C)")
+axes[0].set_ylim(lst_lo, lst_hi)
+bar = fig.colorbar(hb, ax=axes, orientation="vertical", fraction=0.025, pad=0.01)
+bar.outline.set_visible(False)
+bar.set_label("Pixels per hexagon", fontsize=8.5)
+bar.ax.tick_params(labelsize=8, length=2)
+fig.legend(handles=handles, loc="outside lower center", ncols=2, fontsize=8)
+plot.suptitle(fig, "Bare pixels run hottest; canopy and roofs both cool them, until roofs cover almost everything")
+plt.show()
+```
+
+The clearest signal is between bare and covered ground.
+Pixels with less than 5% canopy and less than 5% building cover make up `{python} f"{bare_share:.0f}"`% of urban land.
+Their median reaches `{python} f"{bare_lst:.1f}"` °C, against `{python} f"{covered_lst:.1f}"` °C for the rest.
+Pixels with at least 30% canopy run at a median of `{python} f"{canopy_high:.1f}"` °C, compared with `{python} f"{canopy_low:.1f}"` °C below 5%.
+
+Buildings behave differently from what the term urban heat island suggests.
+At P95, a mix of roofs, streets, and yards runs cooler than open ground, with a median of `{python} f"{roof_mid:.1f}"` °C at 30% to 70% building cover.
+Pixels almost entirely under roof heat up again, to `{python} f"{roof_full:.1f}"` °C above 90% cover.
+Those pixels are mostly large industrial and commercial sheds.
+
+A linear fit with both covers explains `{python} f"{100 * r2:.0f}"`% of the variation in LST.
+Each 10 points of canopy goes with `{python} f"{coef[1]:+.2f}"` °C, holding building cover fixed, and each 10 points of building cover with `{python} f"{coef[2]:+.2f}"` °C.
+These coefficients describe associations across pixels, and planting a tree in one spot may change LST by more or less.
+Soil moisture, irrigation, and surface materials vary with both covers, and neighboring pixels share their heat.
+
+## Exposure: who lives in hot areas?
+
+Each population source has its own errors.
+This section compares three, and reports how far they disagree instead of one number:
+
+- **[GHS-POP R2023A](https://human-settlement.emergency.copernicus.eu/ghs_pop2023.php)** models residential population on a 100 m grid worldwide. The 2025 epoch projects forward from earlier inputs, and the model disaggregates national totals using detected built-up area.
+- **The [2022 census](https://www.indec.gob.ar/indec/web/Nivel4-Tema-2-41-165)** counts people by census tract, called a *radio censal*. INDEC publishes the official figure that municipalities plan with, but every census misses some people, and tracts are coarse.
+- **[Overture building footprints](https://docs.overturemaps.org/guides/buildings/)** say where structures stand. They count no people, but they check where the other two sources put them.
+
+The [GHSL mirror](https://source.coop/nlebovits/ghsl) indexes its tiles in a STAC GeoParquet file.
+The code finds the tiles that cover the partido and reads one window from each in its native Mollweide projection.
+It then resamples the density onto the LST grid.
+
+```{python}
+#| label: ghsl
+x0, y0, x1, y1 = AOI_BOUNDS
+ghsl_items = con.sql(f"""
+    SELECT id, assets.data.href AS href, "proj:bbox" AS proj_bbox
+    FROM '{GHSL_ITEMS_URL}'
+    WHERE bbox.xmin <= {x1} AND bbox.xmax >= {x0} AND bbox.ymin <= {y1} AND bbox.ymax >= {y0}
+""").df()
+
+# STAC bboxes are generous on a curved grid. Keep the items whose native
+# Mollweide extent overlaps the area, and read only that window.
+GHSL_CRS = "ESRI:54009"
+mx0, my0, mx1, my1 = transform_bounds("EPSG:4326", GHSL_CRS, *AOI_BOUNDS, densify_pts=21)
+ghsl_density = np.zeros(GRID_SHAPE, dtype="float32")  # persons per square metre
+with rasterio.Env(**GDAL_ENV):
+    for row in ghsl_items.itertuples():
+        bx0, by0, bx1, by1 = row.proj_bbox
+        if bx0 > mx1 or bx1 < mx0 or by0 > my1 or by1 < my0:
+            continue
+        # The asset href is relative to its item, which sits in a folder named by id.
+        url = f"{GHSL_ITEMS_URL.rsplit('/', 1)[0]}/{row.id}/{row.href.removeprefix('./')}"
+        with rasterio.open(url) as src:
+            win = from_bounds(mx0, my0, mx1, my1, transform=src.transform)
+            win = win.round_offsets().round_lengths()
+            people = src.read(1, window=win, boundless=True, fill_value=0)
+            density = np.where(people < 0, 0, people) / 10_000.0  # 100 m by 100 m cells
+            part = np.zeros(GRID_SHAPE, dtype="float32")
+            reproject(
+                density, part,
+                src_transform=src.window_transform(win), src_crs=src.crs,
+                dst_transform=GRID_TRANSFORM, dst_crs=GRID_CRS,
+                resampling=Resampling.nearest,
+            )
+            ghsl_density += part
+ghsl_pop = ghsl_density * PIXEL_AREA_M2  # persons per LST pixel
+```
+
+The census joins two files from the [census catalog](https://source.coop/nlebovits/censo-argentino).
+`radios.parquet` holds tract boundaries and total population, `POB_TOT_P`.
+`census-data.parquet` holds tabulations in long form, one row per tract, variable, and category.
+The query keeps tracts in Pergamino, coded province `06` and department `623`.
+
+The code then spreads each tract's census count over the LST pixels inside it, in proportion to GHS-POP's modeled population there.
+This dasymetric step keeps the census total while placing people where buildings stand.
+A tract where GHS-POP models nobody spreads its count evenly over its area.
+
+```{python}
+#| label: census
+deprived = ", ".join(f"'{c}'" for c in DEPRIVED_IPMH_CATEGORIES)
+tracts = read_geoparquet(f"""
+    WITH ipmh AS (
+        SELECT
+            id_geo,
+            SUM(conteo) FILTER (WHERE valor_categoria IN ({deprived})) AS households_deprived,
+            SUM(conteo) AS households
+        FROM '{CENSUS_URL}/census-data.parquet'
+        WHERE codigo_variable = 'HOGAR_IPMH'
+          AND prov_code = 6 AND valor_departamento = '623'
+        GROUP BY id_geo
+    )
+    SELECT
+        r.COD_2022 AS tract,
+        r.POB_TOT_P AS population,
+        COALESCE(i.households_deprived, 0) AS households_deprived,
+        COALESCE(i.households, 0) AS households,
+        ST_AsWKB(r.geometry) AS geometry
+    FROM '{CENSUS_URL}/radios.parquet' r
+    LEFT JOIN ipmh i ON r.COD_2022 = i.id_geo
+    WHERE r.PROV = '06' AND r.DEPTO = '623'
+""")
+tracts["deprived_share"] = (tracts.households_deprived / tracts.households).fillna(0.0)
+
+tract_id = burn(((g, i + 1) for i, g in enumerate(tracts.geometry)), dtype="int32")
+k = len(tracts) + 1
+ghsl_by_tract = np.bincount(tract_id.ravel(), weights=ghsl_pop.ravel(), minlength=k)
+area_by_tract = np.bincount(tract_id.ravel(), weights=PIXEL_AREA_M2.ravel(), minlength=k)
+census_total = np.r_[0.0, tracts.population.to_numpy(dtype="float64")]
+modelled = ghsl_by_tract > 0
+weight = np.where(
+    modelled[tract_id],
+    ghsl_pop / np.where(modelled, ghsl_by_tract, 1.0)[tract_id],
+    PIXEL_AREA_M2 / np.where(area_by_tract > 0, area_by_tract, 1.0)[tract_id],
+)
+census_pop = np.where(tract_id > 0, weight * census_total[tract_id], 0.0).astype("float32")
+deprived_pop = census_pop * np.r_[0.0, tracts.deprived_share.to_numpy()][tract_id]
+```
+
+```{python}
+#| label: exposure
+# Count each building once, in the pixel that holds its representative point.
+points = buildings.representative_point()
+cols, rows = ~GRID_TRANSFORM * (points.x.to_numpy(), points.y.to_numpy())
+building_count = np.zeros(GRID_SHAPE, dtype="int32")
+np.add.at(building_count, (rows.astype(int), cols.astype(int)), 1)
+
+
+def by_class(values):
+    """Sum a per-pixel quantity within each urban class, and within its hotspots."""
+    total = np.bincount(urban_class.ravel(), weights=values.ravel(), minlength=4)[1:]
+    hot = np.bincount(urban_class.ravel(), weights=(values * hotspot).ravel(), minlength=4)[1:]
+    return total, hot
+
+
+SOURCE_UNITS = {"GHS-POP 2025": "people", "Census 2022": "people", "Overture buildings": "buildings"}
+rows = []
+for source, values in zip(SOURCE_UNITS, [ghsl_pop, census_pop, building_count], strict=True):
+    total, hot = by_class(values)
+    for name, t, h in zip(URBAN_CLASSES, total, hot, strict=True):
+        rows.append({"source": source, "class": name, "total": t, "in_hotspots": h})
+exposure = pd.DataFrame(rows).assign(share=lambda d: 100 * d.in_hotspots / d.total)
+
+ghsl_partido = float(ghsl_pop[in_partido].sum())
+census_partido = float(tracts.population.sum())
+ghsl_urban = float(ghsl_pop[in_urban].sum())
+census_urban = float(census_pop[in_urban].sum())
+buildings_urban = int(building_count[in_urban].sum())
+divergence = 100 * (ghsl_partido - census_partido) / census_partido
+people_per_building = census_urban / buildings_urban
+exposed = exposure.pivot(index="class", columns="source", values="in_hotspots").reindex(URBAN_CLASSES)
+exposed_low = exposed[["GHS-POP 2025", "Census 2022"]].sum().min()
+exposed_high = exposed[["GHS-POP 2025", "Census 2022"]].sum().max()
+```
+
+The census counts `{python} n(census_partido)` people in the partido in 2022.
+GHS-POP models `{python} n(ghsl_partido)` for 2025, `{python} f"{divergence:+.0f}"`% from the census.
+Inside the urban classes, the sources come closer: `{python} n(census_urban)` people by census and `{python} n(ghsl_urban)` by GHS-POP.
+Overture places `{python} n(buildings_urban)` buildings there, about `{python} f"{people_per_building:.1f}"` census residents per building.
+
+Several mechanisms explain a gap between modeled and counted population:
+
+- **Time:** the 2025 epoch projects forward from earlier inputs, while the census records 2022.
+- **Placement:** GHS-POP distributes people by detected built-up area, which can overfill industrial land and underfill dense blocks.
+- **Undercount:** a census misses some people, most often in informal housing or among seasonal workers.
+
+A gap above about 20% calls for a closer look, because it often points to something on the ground.
+For rates, this tutorial uses the census figure, since the municipality plans with it, and reports the range across sources.
+
+```{python}
+#| label: fig-exposure
+#| fig-cap: "Share of each urban class's population, and of its buildings, that falls in that class's hotspots, by source. The vertical line marks the share that an even spread across the class would put there. Sources: GHS-POP R2023A; INDEC census 2022; Overture Maps buildings; Landsat LST P95 composite."
+#| fig-alt: "Three horizontal bar charts, one per urban class, each comparing GHS-POP, the census, and Overture buildings. All bars fall short of a vertical reference line at the even-spread share. Urban bars sit close together. Peri-urban bars differ more between sources, with the census lowest."
+even_share = 100 - HOTSPOT_PERCENTILE
+sources = list(SOURCE_UNITS)
+fig, axes = plt.subplots(1, 3, figsize=(10, 3.4), sharex=True, sharey=True)
+for ax, name in zip(axes, URBAN_CLASSES, strict=True):
+    d = exposure[exposure["class"] == name].set_index("source").reindex(sources)
+    y = np.arange(len(sources))[::-1]
+    ax.barh(y, d.share, height=0.5, color=plot.URBAN_CLASS_COLORS[name], zorder=2)
+    for yi, (src, row) in zip(y, d.iterrows(), strict=True):
+        ax.text(row.share + 0.6, yi, f"{row.share:.0f}%  ({row.in_hotspots:,.0f} {SOURCE_UNITS[src]})",
+                va="center", fontsize=8, color=plot.INK, zorder=3,
+                bbox={"boxstyle": "square,pad=0.1", "fc": "white", "ec": "none"})
+    ax.axvline(even_share, color=plot.MUTED, lw=0.9, zorder=1)
+    ax.text(even_share + 0.6, 2.45, "Even spread", ha="left", va="bottom", fontsize=7.5,
+            color=plot.INK_SECONDARY)
+    ax.set_ylim(-0.5, 2.8)
+    ax.set_title(plot.URBAN_CLASS_LABELS[name])
+    ax.set_yticks(y, sources)
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x")
+    ax.set_xlim(0, 45)
+    ax.set_xlabel("Share in hotspots (%)")
+plot.suptitle(fig, "Fewer people live in hotspots than an even spread would put there")
+plt.show()
+```
+
+Between `{python} n(exposed_low)` and `{python} n(exposed_high)` people live in hotspots, depending on the source.
+Every class holds fewer people in its hotspots than an even spread would place there, because the hottest pixels are the emptiest ones.
+That finding matches the driver analysis: bare lots, yards, and sheds heat up, and few people sleep in them.
+The people who do live there sit on the city's growing edge, which makes them the focus of the next two sections.
+
+## Vulnerability: who is most at risk?
+
+Exposure asks who is there.
+Vulnerability asks who lacks the means to cope.
+Coping capacity depends on local incomes, housing, health care, and social ties, which makes any global vulnerability indicator a rough proxy.
+
+This tutorial uses the census index of material deprivation in households, the *Índice de Privación Material de los Hogares* (IPMH).
+INDEC publishes it for every tract in the country, and municipal planners already use it.
+IPMH places each household in one of four categories:
+
+1. Without deprivation.
+2. Deprivation of current resources only, which tracks household income and employment.
+3. Deprivation of property resources only, which tracks the quality of the dwelling and its services.
+4. Convergent deprivation, both at once.
+
+The analysis counts categories 2, 3, and 4 as deprived.
+It applies each tract's share of deprived households to the people the dasymetric step places in that tract.
+That share describes households, not people, and larger households weigh more in it than the step assumes.
+
+::: {.callout-tip}
+## Other vulnerability measures
+
+Where a census index does not exist, consider one of these:
+
+- The [Relative Wealth Index](https://dataforgood.facebook.com/dfg/tools/relative-wealth-index) from Meta, a global estimate on a grid of about 2.4 km.
+- Informal settlement boundaries, such as Argentina's [RENABAP](https://www.argentina.gob.ar/habitat/renabap) registry.
+- Age structure from a census, since people over 65 and young children face higher physiological risk.
+- Housing quality from local surveys or building permits.
+
+Each one is a proxy, and none captures the full picture.
+:::
+
+::: {.callout-important}
+## Local knowledge comes first
+
+A deprivation index finds patterns, but it misses what decides a heat emergency.
+It cannot tell you which air conditioners work or which older residents live alone.
+Nor does it show which streets have active neighbor networks, or which workers cannot leave their posts in the heat.
+Municipal staff, community health workers, and neighborhood organizations know these things.
+Use this analysis to direct their attention, not to replace their knowledge.
+:::
+
+```{python}
+#| label: tbl-vulnerability
+#| tbl-cap: "Census population, deprived population, and the share of each in hotspots, by urban class. The inequity ratio divides the deprived share in hotspots by the overall share; above 1, deprived residents live in hotspots more often than their neighbors."
+total_pop, hot_pop = by_class(census_pop)
+total_dep, hot_dep = by_class(deprived_pop)
+vulnerability = pd.DataFrame({
+    "class": URBAN_CLASSES,
+    "population": total_pop, "exposed": hot_pop,
+    "deprived": total_dep, "deprived_exposed": hot_dep,
+}).assign(
+    exposed_share=lambda d: 100 * d.exposed / d.population,
+    deprived_exposed_share=lambda d: 100 * d.deprived_exposed / d.deprived,
+    inequity=lambda d: d.deprived_exposed_share / d.exposed_share,
+)
+deprived_rate = 100 * total_dep.sum() / total_pop.sum()
+inequity = vulnerability.set_index("class").inequity
+table = pd.DataFrame({
+    "Urban class": [plot.URBAN_CLASS_LABELS[c] for c in URBAN_CLASSES],
+    "Population": vulnerability.population.round().astype(int),
+    "In hotspots (%)": vulnerability.exposed_share,
+    "Deprived residents": vulnerability.deprived.round().astype(int),
+    "Deprived in hotspots (%)": vulnerability.deprived_exposed_share,
+    "Inequity ratio": vulnerability.inequity,
+})
+md_table(table, floatfmt="{:.2f}")
+```
+
+About `{python} f"{deprived_rate:.0f}"`% of urban residents live in a household with some material deprivation.
+In the city's urban class, the inequity ratio reaches `{python} f"{inequity['urbana']:.2f}"`, and in the peri-urban class `{python} f"{inequity['periurbana']:.2f}"`.
+At those values, a deprived resident is more likely than a neighbor to live in a hotspot.
+In the rural settlements the ratio is `{python} f"{inequity['urbano en ruralidad']:.2f}"`.
+Use these ratios to rank places for a closer look, not as a count of people at risk.
+
+## Risk by barrio
+
+The barrio is the unit that municipal staff and residents recognize.
+The code rasterizes the `{python} len(barrios)` barrios onto the LST grid and sums each layer inside them.
+A barrio with fewer than `{python} MIN_BARRIO_POPULATION` residents drops out of the ranking.
+
+```{python}
+#| label: barrios
+barrio_id = burn(((g, i + 1) for i, g in enumerate(barrios.geometry)), dtype="int32")
+nb = len(barrios) + 1
+
+
+def per_barrio(values, where=None):
+    """Sum values per barrio, optionally only where a mask holds."""
+    v = np.nan_to_num(values) if where is None else np.nan_to_num(values) * where
+    return np.bincount(barrio_id.ravel(), weights=v.ravel(), minlength=nb)[1:]
+
+
+pixels = per_barrio(np.ones(GRID_SHAPE))
+barrio_risk = barrios[["nombre"]].assign(
+    population=per_barrio(census_pop),
+    exposed=per_barrio(census_pop, hotspot),
+    deprived_exposed=per_barrio(deprived_pop, hotspot),
+    mean_lst=per_barrio(lst) / per_barrio(np.isfinite(lst)),
+    canopy=100 * per_barrio(canopy_share) / per_barrio(np.isfinite(canopy_share)),
+    hotspot_share=100 * per_barrio(hotspot) / pixels,
+)
+barrio_risk["exposed_share"] = 100 * barrio_risk.exposed / barrio_risk.population
+barrio_risk = (
+    barrio_risk[barrio_risk.population >= MIN_BARRIO_POPULATION]
+    .sort_values("exposed", ascending=False)
+    .reset_index(drop=True)
+)
+top3 = barrio_risk.head(3)
+top5_share = 100 * barrio_risk.exposed.head(5).sum() / barrio_risk.exposed.sum()
+```
+
+```{python}
+#| label: fig-barrios
+#| fig-cap: "The barrios with the most census residents in hotspots, ranked. Left, all residents in hotspots and residents of deprived households in hotspots. Center, mean 95th percentile LST across the barrio. Right, mean canopy cover. Sources: INDEC census 2022; GHS-POP R2023A; Landsat LST P95 composite; Meta and WRI canopy height model v2; Municipalidad de Pergamino."
+#| fig-alt: "A ranked dot plot with barrio names down the left side. The first panel shows a gray dot for residents in hotspots and a violet dot for deprived residents in hotspots, joined by a line, with the largest counts at the top. The second panel shows each barrio's mean temperature as a dot colored on the temperature scale. The third panel shows canopy cover as green dots, mostly between 5 and 15 percent."
+top = barrio_risk.head(TOP_BARRIOS).iloc[::-1]
+y = np.arange(len(top))
+DEPRIVED_COLOR = "#6250d6"
+
+fig, (ax_p, ax_t, ax_c) = plt.subplots(1, 3, figsize=(10, 6.4), sharey=True,
+                                       width_ratios=[2.2, 1, 1])
+ax_p.hlines(y, top.deprived_exposed, top.exposed, color=plot.GRID, lw=2, zorder=1)
+ax_p.scatter(top.exposed, y, s=46, color=plot.INK_SECONDARY, edgecolor="white", lw=1.5,
+             zorder=3, label="All residents in hotspots")
+ax_p.scatter(top.deprived_exposed, y, s=46, color=DEPRIVED_COLOR, edgecolor="white", lw=1.5,
+             zorder=3, label="Residents of deprived households in hotspots")
+ax_p.set_xlabel("People in hotspots (census 2022)")
+ax_p.set_yticks(y, top.nombre)
+ax_p.set_xlim(0, None)
+ax_t.scatter(top.mean_lst, y, s=46, c=top.mean_lst, cmap=plot.CMAP_LST, norm=lst_norm,
+             edgecolor="white", lw=1.5, zorder=3)
+ax_t.set_xlabel("Mean P95 LST (°C)")
+ax_c.scatter(top.canopy, y, s=46, color=plt.get_cmap(plot.CMAP_CANOPY)(0.75),
+             edgecolor="white", lw=1.5, zorder=3)
+ax_c.set_xlabel("Canopy cover (%)")
+ax_c.set_xlim(0, None)
+for ax, title in [(ax_p, "Exposure"), (ax_t, "Heat"), (ax_c, "Shade")]:
+    ax.set_title(title)
+    ax.grid(axis="x")
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    for yi in y[::2]:
+        ax.axhspan(yi - 0.5, yi + 0.5, color="#f5f5f2", zorder=0, lw=0)
+ax_p.set_ylim(-0.6, len(top) - 0.4)
+handles, labels = ax_p.get_legend_handles_labels()
+fig.legend(handles, labels, loc="outside lower center", ncols=2, fontsize=8)
+plot.suptitle(
+    fig,
+    f"{top3.nombre.iloc[0]} and {top3.nombre.iloc[1]} hold the most residents in hotspots",
+)
+plt.show()
+```
+
+`{python} top3.nombre.iloc[0]`, `{python} top3.nombre.iloc[1]`, and `{python} top3.nombre.iloc[2]` have the largest numbers of residents in hotspots.
+Together, the top five barrios hold `{python} f"{top5_share:.0f}"`% of all the city's residents in hotspots.
+Size matters as much as heat in this ranking.
+A large barrio with a modest hot share can place above a small one that is mostly hot.
+Read the share column in the table beside the count before you choose where to start.
+
+```{python}
+#| label: tbl-barrios
+#| tbl-cap: "Barrios ranked by census residents in hotspots."
+table = barrio_risk.head(TOP_BARRIOS).assign(
+    rank=lambda d: np.arange(1, len(d) + 1),
+)[["rank", "nombre", "population", "exposed", "exposed_share", "deprived_exposed", "mean_lst", "canopy"]]
+table.columns = [
+    "Rank", "Barrio", "Residents", "In hotspots", "In hotspots (%)",
+    "Deprived in hotspots", "Mean P95 LST (°C)", "Canopy (%)",
+]
+for c in ["Residents", "In hotspots", "Deprived in hotspots"]:
+    table[c] = table[c].round().astype(int)
+md_table(table)
+```
+
+## Summary
+
+```{python}
+#| label: tbl-summary
+#| tbl-cap: "Heat risk in Pergamino at a glance."
+summary = pd.DataFrame(
+    [
+        ("Hazard", "Days above 35 °C a year, 1950–2014 baseline", f"{baseline_days:.0f}"),
+        ("Hazard", "Days above 35 °C a year, 2070–2100, SSP2-4.5",
+         f"{projected('ssp245', '2070-2100'):.0f}"),
+        ("Hazard", "Days above 35 °C a year, 2070–2100, SSP5-8.5",
+         f"{projected('ssp585', '2070-2100'):.0f}"),
+        ("Hazard", "Median P95 LST, urban class", f"{lst_class_median['urbana']:.1f} °C"),
+        ("Exposure", "Residents in hotspots, range across sources",
+         f"{n(exposed_low)} to {n(exposed_high)}"),
+        ("Vulnerability", "Urban residents in deprived households", f"{deprived_rate:.0f}%"),
+        ("Vulnerability", "Deprived residents in hotspots, census", n(hot_dep.sum())),
+        ("Barrios", "Barrio with the most residents in hotspots", top3.nombre.iloc[0]),
+    ],
+    columns=["Dimension", "Measure", "Value"],
+)
+md_table(summary)
+```
+
+GHS-POP, the census, and Overture measure different things, and each answers a different question:
+
+```{python}
+#| label: tbl-sources
+#| tbl-cap: "The three exposure sources compared."
+comparison = pd.DataFrame(
+    [
+        ("GHS-POP 2025", "Modelled grid", "100 m", "Global",
+         f"{n(ghsl_urban)} people", "Uniform method everywhere; fine grid",
+         "A projection; can misplace people in industrial land"),
+        ("Census 2022", "Count", "Census tract", "National",
+         f"{n(census_urban)} people", "Official figure; carries IPMH",
+         "Undercounts; coarse in the fringe; every ten years"),
+        ("Overture buildings", "Structure footprints", "Footprint", "Global",
+         f"{n(buildings_urban)} buildings", "Exact locations; frequent releases",
+         "Counts no people; no use or height in most of Argentina"),
+    ],
+    columns=["Source", "Type", "Unit", "Coverage", "Urban total", "Strengths", "Limits"],
+)
+md_table(comparison)
+```
+
+## Recommendations
+
+This section turns the findings into actions that hold under every emissions scenario.
+Each recommendation points to the finding behind it.
+For the policy reasoning behind decisions under deep uncertainty, see the companion material in the [Great Data Products episode](https://greatdataproducts.com/episodes/2026/09/wesley-heat-data/).
+
+### 1. Adopt a heat emergency plan
+
+Set clear thresholds that activate an emergency response, and coordinate them across municipal departments.
+
+- Use the baseline of `{python} f"{baseline_days:.0f}"` days a year above 35 °C to separate a normal summer from an emergency.
+- Stage water, shade, and cooling points in the barrios at the top of @tbl-barrios before the season starts.
+- Send early warnings through several channels, and target the barrios with high inequity ratios first.
+
+An emergency plan needs little capital and adapts as conditions change, which makes it the right first step under any scenario.
+
+### 2. Reduce risk where exposure and deprivation meet
+
+Direct capital spending to the barrios that rank high on both residents and deprived residents in hotspots.
+
+- Start with `{python} top3.nombre.iloc[0]`, `{python} top3.nombre.iloc[1]`, and `{python} top3.nombre.iloc[2]`.
+- Fund green and blue infrastructure there first, and build passive cooling into every new public building.
+- Where trees cannot grow, use shade structures and cool materials instead.
+
+Shade, stormwater control, and cleaner air bring benefits even without further warming.
+Spending in the highest-risk barrios first puts each peso where heat and people meet.
+
+### 3. Grow a connected tree canopy
+
+Plant and protect trees along corridors that link the hottest barrios to cool public spaces.
+
+- Choose native species that tolerate the hotter climate the projections describe.
+- Prioritize the open, bare ground at the fringe, where @fig-drivers shows the highest temperatures.
+- Learn from [Medellín's green corridors](https://www.unep.org/en/news-and-stories/story/medellin-shows-how-nature-based-solutions-can-keep-people-and-planet-cool), which the city reports cut its heat island by about 2 °C.
+
+Canopy cools under every scenario.
+Under SSP1-2.6 it improves daily life, and under SSP5-8.5 it becomes critical infrastructure.
+
+### 4. Use built and non-structural measures where trees cannot go
+
+Large sheds and industrial yards cannot host a canopy, and @fig-drivers shows that fully roofed pixels heat back up.
+
+- Require reflective roofs on new industrial and commercial buildings.
+- Add shade structures over yards and parking where people work outdoors.
+- Require cross-ventilation in new housing codes.
+- Shift outdoor work schedules on emergency days.
+
+Each measure works on its own and can grow incrementally as budgets allow.
+
+### 5. Educate and engage residents
+
+Build public understanding of heat risk and of what protects people from it.
+
+- Run an awareness campaign before each summer.
+- Train community health workers in the priority barrios.
+- Hold a yearly workshop for municipal staff on the updated risk maps.
+- Publish this analysis, and its code, for anyone to check and repeat.
+
+Understanding builds the political support that sustained investment needs, and it counters the human habit of underpreparing for rare disasters.
+
+### Limits of this analysis
+
+- **Surface is not air.** LST ranks surfaces by heat, and it does not measure the heat stress a person feels.
+- **Deprivation is not vulnerability.** IPMH misses age, health, isolation, and outdoor work.
+- **Models disagree.** The run-to-run spread in @tbl-projections is wide, especially late in the century.
+- **No local knowledge.** Field visits and conversations with residents should test every ranking here.
+
+## Explore the layers
+
+The map below shows the layers from this tutorial over the city.
+Use the checkboxes to switch layers on and off, and select a barrio to see its numbers in the side panel.
+The map runs in your browser and needs no Python kernel.
+
+```{python}
+#| label: map
+import base64
+
+import ipywidgets as widgets
+from lonboard import BitmapLayer, Map, PolygonLayer
+from lonboard.basemap import CartoStyle, MaplibreBasemap
+from lonboard.controls import FullscreenControl, NavigationControl, ScaleControl
+from PIL import Image
+from rasterio.features import shapes
+
+
+def png_data_uri(rgba):
+    buffer = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buffer, format="PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def colorize(values, cmap, norm):
+    """Colour an array with a matplotlib colormap; NaN becomes transparent."""
+    rgba = plt.get_cmap(cmap)(norm(values), bytes=True)
+    rgba[~np.isfinite(values)] = 0
+    return rgba
+
+
+city_transform = rasterio.windows.transform(city_win, GRID_TRANSFORM)
+map_bounds = list(rasterio.windows.bounds(city_win, GRID_TRANSFORM))
+lst_layer = BitmapLayer(
+    image=png_data_uri(colorize(lst[city_rows, city_cols], plot.CMAP_LST, lst_norm)),
+    bounds=map_bounds, opacity=0.85, pickable=False,
+)
+canopy_layer = BitmapLayer(
+    image=png_data_uri(colorize(100 * canopy_share[city_rows, city_cols],
+                                truncated(plot.CMAP_CANOPY), cover_norm)),
+    bounds=map_bounds, opacity=0.9, pickable=False, visible=False,
+)
+
+# Buildings travel as a footprint bitmap at 1/8 of an LST pixel. As vectors,
+# the city's footprints would add several megabytes to this page.
+footprint = rasterize(
+    buildings.geometry[buildings.intersects(box(*map_bounds))],
+    out_shape=(city_win.height * SUPERSAMPLE, city_win.width * SUPERSAMPLE),
+    transform=city_transform * Affine.scale(1 / SUPERSAMPLE), fill=0, dtype="uint8",
+)
+footprint_rgba = np.zeros((*footprint.shape, 4), dtype="uint8")
+footprint_rgba[footprint == 1] = (98, 80, 214, 210)
+building_layer = BitmapLayer(
+    image=png_data_uri(footprint_rgba), bounds=map_bounds, pickable=False, visible=False
+)
+
+hot_city = hotspot[city_rows, city_cols].astype("uint8")
+hotspot_gdf = gpd.GeoDataFrame(
+    geometry=[shapely.geometry.shape(g) for g, _ in
+              shapes(hot_city, mask=hot_city == 1, transform=city_transform)],
+    crs="EPSG:4326",
+)
+hotspot_layer = PolygonLayer.from_geopandas(
+    hotspot_gdf, get_fill_color=[0, 229, 255, 40], get_line_color=[0, 229, 255, 255],
+    line_width_min_pixels=1.5, pickable=False,
+)
+
+barrio_props = barrio_risk.rename(columns={
+    "population": "residents", "exposed": "residents_in_hotspots",
+    "deprived_exposed": "deprived_in_hotspots", "mean_lst": "mean_p95_lst_c",
+    "canopy": "canopy_pct",
+})
+barrio_gdf = barrios[["nombre", "geometry"]].merge(
+    barrio_props[["nombre", "residents", "residents_in_hotspots", "deprived_in_hotspots",
+                  "mean_p95_lst_c", "canopy_pct"]].round(1),
+    on="nombre", how="left",
+)
+barrio_layer = PolygonLayer.from_geopandas(
+    barrio_gdf, filled=True, get_fill_color=[0, 0, 0, 0], get_line_color=[20, 20, 20, 230],
+    line_width_min_pixels=1.2, auto_highlight=True, highlight_color=[255, 255, 255, 70],
+)
+
+layers = {
+    "Surface temperature (P95)": lst_layer,
+    "Canopy cover": canopy_layer,
+    "Buildings (Overture)": building_layer,
+    "Hotspots (cyan outline)": hotspot_layer,
+    "Barrios": barrio_layer,
+}
+cx, cy = (map_bounds[0] + map_bounds[2]) / 2, (map_bounds[1] + map_bounds[3]) / 2
+heat_map = Map(
+    list(layers.values()),
+    basemap=MaplibreBasemap(style=CartoStyle.Positron),
+    view_state={"longitude": cx, "latitude": cy, "zoom": 12.3},
+    controls=[NavigationControl(), ScaleControl(position="bottom-left"), FullscreenControl()],
+    height=600,
+)
+toggles = []
+for name, layer in layers.items():
+    toggle = widgets.Checkbox(value=layer.visible, description=name, indent=False,
+                              layout=widgets.Layout(width="auto", margin="0 16px 0 0"))
+    widgets.jslink((toggle, "value"), (layer, "visible"))
+    toggles.append(toggle)
+
+
+def gradient(cmap, norm, title, unit, start=0.0):
+    """A small HTML colour ramp for the map legend."""
+    stops = ", ".join(
+        f"rgb({r * 255:.0f},{g * 255:.0f},{b * 255:.0f})"
+        for r, g, b, _ in plt.get_cmap(cmap)(np.linspace(start, 1, 8))
+    )
+    lo, hi = norm.boundaries[0], norm.boundaries[-1]
+    return (
+        f"<div style='display:inline-block;margin-right:24px;font-size:12px'>{title}<br>"
+        f"<span style='display:inline-block;width:160px;height:10px;"
+        f"background:linear-gradient(90deg,{stops})'></span><br>"
+        f"<span>{lo:g}</span><span style='float:right'>{hi:g} {unit}</span></div>"
+    )
+
+
+legend = widgets.HTML(
+    gradient(plot.CMAP_LST, lst_norm, "Surface temperature, P95", "°C")
+    + gradient(plot.CMAP_CANOPY, cover_norm, "Canopy cover", "%", start=0.12)
+)
+widgets.VBox([
+    widgets.HBox(toggles, layout=widgets.Layout(flex_flow="row wrap")),
+    legend,
+    heat_map,
+])
+```
+
+## Run time
+
+```{python}
+#| label: runtime
+elapsed_min = (time.perf_counter() - T0) / 60
+```
+
+The last full run of this notebook took `{python} f"{elapsed_min:.1f}"` minutes, most of it spent on network reads.

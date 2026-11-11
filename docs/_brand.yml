@@ -1,0 +1,57 @@
+# Brand for the docs site. It matches the web map
+# (https://sensable-heat.vercel.app/): IBM Plex Sans and IBM Plex Mono on
+# neutral greys, with accents taken from matplotlib's magma ramp, the ramp the
+# published thumbnail uses.
+#
+# The site has one color scheme, light. styles.scss holds everything a brand
+# file cannot express, and lst-code.theme colors code with the same palette.
+meta:
+  name: Landsat LST P95
+  link:
+    home: https://nlebovits.github.io/landsat-lst-pipeline/
+    github: https://github.com/nlebovits/landsat-lst-pipeline
+
+color:
+  palette:
+    # magma(t) samples, dark to light.
+    magma-0: "#000004"
+    magma-1: "#3b0f70"
+    magma-2: "#8c2981"
+    magma-3: "#b73779"
+    magma-4: "#de4968"
+    magma-5: "#fc8961"
+    magma-6: "#fcfdbf"
+    ink: "#0c0e11"
+    paper: "#fafaf9"
+    # magma-3 darkened until it passes WCAG AA as text on paper.
+    accent: "#a52f6c"
+    mute: "#5e5e5a"
+  foreground: ink
+  background: paper
+  primary: accent
+  secondary: mute
+
+typography:
+  fonts:
+    - family: IBM Plex Sans
+      source: google
+      weight: [400, 500, 600]
+      style: [normal, italic]
+    - family: IBM Plex Mono
+      source: google
+      weight: [400, 500]
+  base:
+    family: IBM Plex Sans
+    # 1rem of the 17px root that styles.scss sets. A size in px here becomes
+    # 1.0625rem, which the 17px root turns into 18px.
+    size: 1rem
+    line-height: 1.6
+  headings:
+    family: IBM Plex Sans
+    weight: 600
+    line-height: 1.25
+  monospace:
+    family: IBM Plex Mono
+    size: 0.9em
+  link:
+    decoration: underline

@@ -1142,22 +1142,73 @@ def _decode_snippet(asset_href: str) -> str:
     )
 
 
-#: Every repository file a link in the canonical README points at.
+#: Where the dataset description lives, relative to the repository root.
 #:
-#: That README is the repository's own front door, so three of its links are
-#: repository-relative. A copy served from the bucket resolves them against the
-#: bucket, where none of the three exists. Source Cooperative resolves a
-#: relative Markdown link one directory higher again, so even a published
-#: sibling would miss.
+#: The author's text used to be the repository README, copied whole into the
+#: catalog. It now lives as one file per section under `docs/_readme/`, because
+#: the documentation site includes each section on its own page. The root
+#: README became a page of links and no longer describes the dataset.
+README_PARTIALS_DIR = Path("docs") / "_readme"
+
+#: The sections every published README carries, in the order it carries them.
+#:
+#: The order is the one the repository README had before the split. Two of its
+#: sections are absent, and neither has a partial. The site's own tutorial
+#: replaces the example notebook pointer, and the development notes address a
+#: contributor rather than a reader of the data.
+PUBLISHED_README_PARTIALS = (
+    "intro",
+    "philosophy",
+    "processing",
+    "storage-and-access",
+    "known-issues",
+    "intended-use",
+    "provenance",
+    "license",
+)
+
+#: Sections the site shows and the catalog does not. Empty today.
+#:
+#: `tests/test_readme_partials.py` requires every file in `README_PARTIALS_DIR`
+#: to appear in this tuple or in `PUBLISHED_README_PARTIALS`. A new partial
+#: then has to say where it goes, rather than reaching the site and silently
+#: missing the catalog.
+SITE_ONLY_README_PARTIALS: tuple[str, ...] = ()
+
+#: The lines that open and close the published README.
+#:
+#: Each partial carries its own pair of Vale markers, since the site includes
+#: it alone. The published file carries one pair around the whole body,
+#: which is the shape it had while it was a copy of the repository README.
+_README_HEADER = (
+    "<!-- Vale is disabled here to preserve the author's wording. -->\n"
+    "<!-- vale off -->\n"
+)
+_README_FOOTER = "<!-- vale on -->\n"
+_VALE_OFF = "<!-- vale off -->"
+_VALE_ON = "<!-- vale on -->"
+
+#: Every site-relative link the partials hold, against what it becomes in the
+#: published README.
+#:
+#: The partials link the way the documentation site resolves them: a leading
+#: `/` names a path under `docs/`, the Quarto project root. A copy served from
+#: the bucket resolves the same target against the bucket, where nothing
+#: exists. Source Cooperative resolves a relative Markdown link one directory
+#: higher again, so even a published sibling would miss.
+#:
+#: A value starting with `#` is an anchor in the published README itself. The
+#: site keeps the known issues on their own page, and the published file keeps
+#: them as a section. Any other value is a repository path, rewritten against
+#: `host_url` by `_published_link_rewrites`.
 #:
 #: `_published_readme` refuses to write a document holding a relative link
-#: this tuple does not name. A fourth relative link added to the canonical
-#: README then fails the build rather than publishing a dead one.
-_REPOSITORY_RELATIVE_LINKS = (
-    "docs/images/aster-ged-coverage-usgs.jpg",
-    "./AGENTS.md",
-    "./LICENSE",
-)
+#: this mapping does not name. A new relative link added to a partial then
+#: fails the build rather than publishing a dead one.
+_SITE_RELATIVE_LINKS = {
+    "/about/known-issues.qmd": "#known-issues",
+    "/images/aster-ged-coverage-usgs.jpg": "docs/images/aster-ged-coverage-usgs.jpg",
+}
 
 _MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)\)")
 
@@ -1176,59 +1227,117 @@ def _relative_link_targets(markdown: str) -> list[str]:
 
 
 def _published_link_rewrites(host_url: str) -> dict[str, str]:
-    """Each repository-relative target, against its absolute repository URL.
+    """Each site-relative target, against what the published README links.
 
-    Built from `host_url` rather than from a literal, so a fork rewrites to its
-    own files.
+    A repository path resolves against `host_url` rather than a literal, so a
+    fork rewrites to its own files. An image goes to the raw host, and any
+    other file goes to the blob page. An anchor stays an anchor.
     """
     raw = host_url.replace("https://github.com/", "https://raw.githubusercontent.com/")
     rewrites: dict[str, str] = {}
-    for target in _REPOSITORY_RELATIVE_LINKS:
-        path = target.removeprefix("./")
-        if path.lower().endswith(_RENDERED_INLINE):
-            rewrites[target] = f"{raw}/main/{path}"
+    for target, published in _SITE_RELATIVE_LINKS.items():
+        if published.startswith("#"):
+            rewrites[target] = published
+        elif published.lower().endswith(_RENDERED_INLINE):
+            rewrites[target] = f"{raw}/main/{published}"
         else:
-            rewrites[target] = f"{host_url}/blob/main/{path}"
+            rewrites[target] = f"{host_url}/blob/main/{published}"
     return rewrites
 
 
-def canonical_readme_path(start: Path | None = None) -> Path:
-    """The repository README, found by walking up from this module.
+def readme_partials_dir(start: Path | None = None) -> Path:
+    """The directory of README sections, found by walking up from this module.
 
-    Every published README is a copy of that file, so a build that cannot find
-    it stops here. A generated stand-in would publish a description of this
-    dataset that nobody wrote.
+    The walk stops at the first directory holding `pyproject.toml`, which is
+    the repository root. Every published README is built from the sections
+    under it. A build that cannot find them stops here, because a generated
+    stand-in would publish a description of this dataset that nobody wrote.
     """
     here = (start or Path(__file__)).resolve()
     for parent in here.parents:
-        if (parent / "pyproject.toml").is_file() and (parent / "README.md").is_file():
-            return parent / "README.md"
+        if (parent / "pyproject.toml").is_file():
+            partials = parent / README_PARTIALS_DIR
+            if partials.is_dir():
+                return partials
+            break
     raise FileNotFoundError(
-        f"no repository README above {here}. Every published README copies "
-        "that file, so this build cannot write one."
+        f"no {README_PARTIALS_DIR} in the repository above {here}. Every "
+        "published README is built from those sections, so this build cannot "
+        "write one."
     )
 
 
-def _published_readme(markdown: str, *, host_url: str = DEFAULT_HOST_URL) -> str:
-    """The canonical README, with its repository-relative links made absolute.
+def _partial_body(name: str, text: str) -> str:
+    """One section's Markdown, without the Vale markers that wrap it.
 
-    The repository README is the one description of this dataset and a person
-    wrote it. A published copy carries that text and changes nothing in it
-    except the three links a bucket cannot resolve. The Vale markers travel
-    with the body, so the prose gate reads the copies the way it reads the
-    original.
+    The published README turns Vale off once for its whole body. A marker left
+    inside that body would switch the gate back on part of the way through,
+    and the prose gate would then check the author's wording in the catalog
+    copy while it skips the same words in the repository.
+    """
+    body = text.strip()
+    if not (body.startswith(_VALE_OFF) and body.endswith(_VALE_ON)):
+        raise ValueError(
+            f"{README_PARTIALS_DIR / name}.md has to open with {_VALE_OFF} and "
+            f"close with {_VALE_ON}, the way every README section does."
+        )
+    body = body.removeprefix(_VALE_OFF).removesuffix(_VALE_ON).strip()
+    if _VALE_OFF in body or _VALE_ON in body:
+        raise ValueError(
+            f"{README_PARTIALS_DIR / name}.md holds a Vale marker inside its "
+            "body. The published README carries one pair around all of it."
+        )
+    return body
+
+
+def assemble_readme(partials_dir: Path | None = None) -> str:
+    """The published sections joined into one README, links still site-relative.
+
+    The result reads like the repository README before the split, without the
+    two sections that `PUBLISHED_README_PARTIALS` leaves out.
+    """
+    directory = partials_dir or readme_partials_dir()
+    bodies = [
+        _partial_body(name, (directory / f"{name}.md").read_text(encoding="utf-8"))
+        for name in PUBLISHED_README_PARTIALS
+    ]
+    return f"{_README_HEADER}\n" + "\n\n".join(bodies) + f"\n\n{_README_FOOTER}"
+
+
+def _published_readme(markdown: str, *, host_url: str = DEFAULT_HOST_URL) -> str:
+    """The assembled README, with its site-relative links made absolute.
+
+    The sections are the one description of this dataset, and a person wrote
+    them. A published copy carries that text and changes nothing in it except
+    the links a bucket cannot resolve. Absolute links pass through unchanged.
     """
     rewrites = _published_link_rewrites(host_url)
     unknown = sorted(set(_relative_link_targets(markdown)) - set(rewrites))
     if unknown:
         raise ValueError(
-            "the canonical README holds relative links this module cannot "
+            "the README sections hold relative links this module cannot "
             f"rewrite for the bucket: {unknown}. Name each one in "
-            "_REPOSITORY_RELATIVE_LINKS."
+            "_SITE_RELATIVE_LINKS."
         )
     for target, absolute in rewrites.items():
         markdown = markdown.replace(f"]({target})", f"]({absolute})")
     return markdown
+
+
+def published_readme(
+    *, host_url: str = DEFAULT_HOST_URL, partials_dir: Path | None = None
+) -> str:
+    """The README that both catalog directories publish.
+
+    Args:
+        host_url: The repository the rewritten links point at.
+        partials_dir: The README sections. Defaults to the repository's own,
+            found by `readme_partials_dir`.
+
+    Returns:
+        The Markdown body, wrapped in one pair of Vale markers.
+    """
+    return _published_readme(assemble_readme(partials_dir), host_url=host_url)
 
 
 def _worked_example_item(items: list[dict[str, Any]]) -> str:
@@ -1794,8 +1903,9 @@ def rebuild_collection(
     moves no gigabytes to draw a 480 px preview.
 
     `host_url` points at the repository and `public_base` points at the
-    bucket. Both README copies come from the repository's own `README.md`,
-    with its three repository-relative links rewritten against `host_url`.
+    bucket. Both README copies come from the sections under `docs/_readme/`,
+    joined by `published_readme`, with their site-relative links rewritten
+    against `host_url`.
     The `AGENTS.md` examples address the published assets under
     `public_base`, so a reader can run them as written.
     """
@@ -1832,9 +1942,7 @@ def rebuild_collection(
     # Both directories get the same two documents. The catalog holds one
     # collection, so the root and the collection describe one dataset, and
     # PTL-FIL-001 wants a README and an AGENTS.md in each of them.
-    readme = _published_readme(
-        canonical_readme_path().read_text(encoding="utf-8"), host_url=host_url
-    )
+    readme = published_readme(host_url=host_url)
     agents = _agents_md(collection_id, ordered, public_base=public_base)
     for directory in (Path(root), collection_dir):
         (directory / "README.md").write_text(readme, encoding="utf-8")

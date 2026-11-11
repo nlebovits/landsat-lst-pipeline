@@ -33,17 +33,18 @@ from lst.cog_catalog import (
     STATISTICS_KEYS,
     THUMBNAIL_FILENAME,
     VALID_PERCENT_KEY,
+    _published_readme,
     _renders,
     _rfc3339,
     _worked_example_item,
     _verify_cog,
     band_statistics,
-    canonical_readme_path,
     catalog_provenance,
     check_raster_shape,
     correction_lineage,
     mask_lineage,
     multihash_sha256,
+    published_readme,
     read_cog_encoding,
     read_items,
     tile_id,
@@ -980,8 +981,8 @@ class TestASecondTile:
         The published README used to be generated, and it carried a row per
         tile. At 769 tiles that table was longer than the prose around it and
         it duplicated `items.parquet`, which answers the same question in one
-        range request. The README is now the repository's canonical text, and
-        it names one tile as an example and no others.
+        range request. The README now joins the repository's README sections,
+        and it names one tile as an example and no others.
         """
         readme = (pair / COLLECTION_ID / "README.md").read_text()
         assert "| Tile | Land pixels |" not in readme
@@ -1294,17 +1295,18 @@ class TestCoverageReachesTheItem:
         assert p["lst:valid_pixels"] <= p["lst:land_pixels"]
         assert p["lst:coastal_buffer_valid_pixels"] <= p["lst:coastal_buffer_pixels"]
 
-    def test_the_published_readme_is_the_repository_readme(self, tmp_path, composite):
+    def test_the_published_readme_is_built_from_the_sections(self, tmp_path, composite):
         """Where the per-tile numbers went.
 
         The collection README used to hold a 769-row table built from these
-        same properties. It is now a copy of the repository's own README, and
-        the per-tile numbers reach a reader through `items.parquet` and the
-        item documents. A reader who wants the table builds it from those.
+        same properties. It now joins the README sections under
+        `docs/_readme/`, and the per-tile numbers reach a reader through
+        `items.parquet` and the item documents. A reader who wants the table
+        builds it from those.
         """
         _item, readme = self.written(tmp_path, composite)
-        canonical = canonical_readme_path().read_text(encoding="utf-8")
-        assert readme.splitlines()[3] == canonical.splitlines()[3]
+        assert readme == published_readme()
+        assert readme.splitlines()[3] == "# Landsat LST P95 composites (2021–2025)"
         assert "| Tile | Land pixels |" not in readme
 
     def test_a_run_without_land_geometry_publishes_no_share_of_land(
@@ -1346,3 +1348,59 @@ class TestCoverageReachesTheItem:
             (root / COLLECTION_ID / ITEM_ID / f"{ITEM_ID}.json").read_text()
         )
         assert "lst:valid_fraction" not in item["properties"]
+
+
+class TestThePublishedReadmeLinks:
+    """The links a bucket cannot resolve, and what each one becomes.
+
+    The sections link the way the documentation site resolves them. A copy
+    served from Source Cooperative resolves the same targets against the
+    bucket, where none of them exists.
+    """
+
+    HOST = "https://github.com/someone/fork"
+
+    def test_the_image_goes_to_the_raw_host_of_the_given_repository(self):
+        markdown = "![coverage](/images/aster-ged-coverage-usgs.jpg)"
+        assert _published_readme(markdown, host_url=self.HOST) == (
+            "![coverage](https://raw.githubusercontent.com/someone/fork"
+            "/main/docs/images/aster-ged-coverage-usgs.jpg)"
+        )
+
+    def test_the_known_issues_page_becomes_a_section_anchor(self):
+        """The site keeps known issues on a page, the README as a section."""
+        markdown = "(See [known issues](/about/known-issues.qmd) for more.)"
+        assert _published_readme(markdown, host_url=self.HOST) == (
+            "(See [known issues](#known-issues) for more.)"
+        )
+
+    def test_absolute_links_and_anchors_pass_through(self):
+        markdown = (
+            "[Apache 2.0](https://github.com/nlebovits/landsat-lst-pipeline"
+            "/blob/main/LICENSE) and [a section](#provenance)"
+        )
+        assert _published_readme(markdown, host_url=self.HOST) == markdown
+
+    def test_an_unknown_relative_link_fails_the_build(self):
+        """A dead link in the bucket is worse than a failed build."""
+        with pytest.raises(ValueError, match="/about/methods.qmd"):
+            _published_readme("[methods](/about/methods.qmd)", host_url=self.HOST)
+
+    def test_the_published_readme_has_no_site_relative_link_left(self):
+        readme = published_readme(host_url=self.HOST)
+        assert "](/" not in readme
+        assert "](./" not in readme
+        assert "](#known-issues)" in readme
+        assert "## Known issues" in readme
+
+    def test_the_published_readme_turns_vale_off_once(self):
+        """One pair of markers around the body, as the file has always had.
+
+        Each section carries its own pair for the site. Left in, the pairs
+        would switch the prose gate back on between sections.
+        """
+        readme = published_readme(host_url=self.HOST)
+        assert readme.count("<!-- vale off -->") == 1
+        assert readme.count("<!-- vale on -->") == 1
+        assert readme.splitlines()[1] == "<!-- vale off -->"
+        assert readme.endswith("\n<!-- vale on -->\n")

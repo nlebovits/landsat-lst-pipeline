@@ -1,0 +1,32 @@
+<script>
+// Sidebar links that leave the site. Each gets the `lst-external` class,
+// which styles.scss marks with an arrow, and a tooltip that names the
+// destination. The tooltip uses the tippy library and `quarto` theme that
+// Quarto already loads for footnote hovers. Focus shows it too, and tippy
+// links it to the anchor with aria-describedby.
+// Quarto rewrites sidebar hrefs to absolute URLs, so the test is the host,
+// not the href's prefix.
+window.addEventListener("DOMContentLoaded", () => {
+  const links = document.querySelectorAll("#quarto-sidebar .sidebar-item a");
+  for (const link of links) {
+    const url = new URL(link.href, window.location.href);
+    if (url.host === window.location.host) continue;
+    const where = (url.host + url.pathname).replace(/\/$/, "");
+    link.classList.add("lst-external");
+    if (window.tippy) {
+      window.tippy(link, {
+        content: where,
+        theme: "quarto lst-destination",
+        placement: "right",
+        arrow: false,
+        offset: [0, 12],
+        delay: [150, 0],
+        touch: false,
+        appendTo: () => document.body,
+      });
+    } else {
+      link.title = where;
+    }
+  }
+});
+</script>

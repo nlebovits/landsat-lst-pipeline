@@ -44,17 +44,27 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: Every document whose Python blocks have to run.
 #:
-#: The canonical README and its two published copies carry the same block, and
-#: both published `AGENTS.md` copies carry the same block. They are listed
-#: separately rather than deduplicated here, because a copy that has drifted
-#: from its source is itself the failure this catches.
+#: The canonical storage-and-access section and the two published READMEs built
+#: from it carry the same block, and both published `AGENTS.md` copies carry the
+#: same block. They are listed separately rather than deduplicated here,
+#: because a copy that has drifted from its source is itself the failure this
+#: catches.
+#:
+#: The quickstart page includes that section through Quarto and is not listed.
+#: Its own code is executable ```{python} cells, which Quarto runs when it
+#: renders the page. The docs workflow renders the page from an empty freeze
+#: on every pull request that changes it, and a cell that raises fails that
+#: job. Running those cells here as well would test them twice.
 DOCUMENTS = (
-    "README.md",
+    "docs/_readme/storage-and-access.md",
     "catalog/README.md",
     "catalog/AGENTS.md",
     "catalog/lst-p95-2021-2025/README.md",
     "catalog/lst-p95-2021-2025/AGENTS.md",
 )
+
+#: The section every published README copies its block from.
+CANONICAL_README_BLOCKS = "docs/_readme/storage-and-access.md"
 
 _BLOCK = re.compile(r"^```python\n(.*?)^```$", re.DOTALL | re.MULTILINE)
 
@@ -142,10 +152,19 @@ class TestTheDocumentsCarryBlocksWeCheck:
             )
 
     def test_the_published_readme_block_matches_the_canonical_one(self):
-        """The three README copies carry one block, not three that drifted."""
-        canonical = blocks_in("README.md")
+        """The section and its two published copies carry one block, not three
+        that drifted."""
+        canonical = blocks_in(CANONICAL_README_BLOCKS)
         for relative in ("catalog/README.md", "catalog/lst-p95-2021-2025/README.md"):
             assert blocks_in(relative) == canonical
+
+    def test_the_quickstart_includes_the_canonical_section(self):
+        """The quickstart's first block is the section's, through the include.
+
+        Copying the block into the page would give it a fourth copy to drift.
+        """
+        page = (ROOT / "docs/quickstart.qmd").read_text(encoding="utf-8")
+        assert "{{< include /_readme/storage-and-access.md >}}" in page
 
     def test_both_published_agents_blocks_match(self):
         assert blocks_in("catalog/AGENTS.md") == blocks_in(
@@ -198,6 +217,9 @@ def test_the_documented_block_runs(relative, index, block, tmp_path):
 
     stderr is not asserted on. Both readers emit shutdown-time noise from
     GDAL that says nothing about whether the example worked.
+
+    The appended assertion prints the last line, and only that line is
+    checked. A block may print lines of its own first, for the reader.
     """
     script = tmp_path / f"block_{index}.py"
     script.write_text(block + assertion_for(block), encoding="utf-8")
@@ -211,4 +233,5 @@ def test_the_documented_block_runs(relative, index, block, tmp_path):
     assert finished.returncode == 0, (
         f"{relative} block {index} failed:\n{finished.stdout}\n{finished.stderr}"
     )
-    assert finished.stdout.startswith("OK "), finished.stdout
+    lines = finished.stdout.splitlines()
+    assert lines and lines[-1].startswith("OK "), finished.stdout

@@ -1,0 +1,29 @@
+---
+title: Examples
+toc: false
+code-tools: false
+listing:
+  id: examples
+  contents:
+    - "*/index.qmd"
+  type: grid
+  grid-columns: 3
+  fields: [image, title, author, description, categories]
+  categories: true
+  sort: "title"
+  image-height: 160px
+  image-placeholder: ../images/thumbnail.png
+  filter-ui: true
+  sort-ui: false
+---
+
+Each example is a notebook about one place. It reads the [Landsat LST P95 composite](https://source.coop/nlebovits/landsat-lst) for an area of interest and compares it with other data for the same area, such as building footprints or tree canopy height. The [Pergamino tutorial](../tutorials/pergamino.qmd) shows the pattern from start to finish.
+
+::: {#examples}
+:::
+
+::: lst-empty
+## Contribute the first example
+
+The gallery has no notebooks yet. If you work with heat data for a city or region, a short notebook about it helps the next reader of that place. [Contribute a notebook](../contribute/notebooks.qmd) explains the folder layout, the front matter, and the checks a pull request runs.
+:::

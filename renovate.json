@@ -1,0 +1,97 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "timezone": "Etc/UTC",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 6am on monday"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Leave pyproject.toml ranges as written and move only uv.lock within them. An exact == pin stays an exact pin.",
+      "matchManagers": [
+        "pep621"
+      ],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "description": "frisky 0.7.2 imports the private dask._task_spec and dask._expr modules and declares no dask bound. Move the dask pin by hand, together with frisky.",
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchPackageNames": [
+        "dask"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Group the action digest pins into one pull request.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "pinDigest",
+        "digest"
+      ],
+      "groupName": "GitHub Actions digests"
+    },
+    {
+      "description": "Vale is pinned twice, in prose.yml and in prek.toml. Move both in one pull request.",
+      "matchPackageNames": [
+        "vale-cli/vale"
+      ],
+      "groupName": "Vale"
+    },
+    {
+      "description": "commitizen is pinned twice, as the prek hook revision and in release.yml. Move both in one pull request.",
+      "matchPackageNames": [
+        "commitizen-tools/commitizen",
+        "commitizen"
+      ],
+      "groupName": "commitizen"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The Vale release that the prose workflow downloads.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/prose\\.yml$/"
+      ],
+      "matchStrings": [
+        "VALE_VERSION: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "vale-cli/vale",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "Hook revisions in prek.toml. Renovate's pre-commit manager reads only .pre-commit-config.yaml, and no released Renovate manager reads prek.toml yet.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)prek\\.toml$/"
+      ],
+      "matchStrings": [
+        "repo = \"https://github\\.com/(?<depName>[^\"]+?)\"\\s*\\nrev = \"(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "description": "The commitizen release that the release workflow runs through uvx.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/release\\.yml$/"
+      ],
+      "matchStrings": [
+        "--from commitizen==(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "commitizen"
+    }
+  ]
+}

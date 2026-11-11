@@ -15,9 +15,13 @@
 
 [project]
 name = "landsat-lst-smoke"
-version = "0.0.0"
+version = "0.1.0"
 description = "Profiling a p95 composite of land surface temperature"
 requires-python = ">=3.12,<3.15"
+# The code. The published composites are CC0-1.0, which `collection.json`
+# states, and the prose of the docs site is CC-BY-4.0, which its footer states.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
   "rasterio",
   # `destripe.py` imports `affine` directly, to build the swath transform. It
@@ -147,6 +151,54 @@ dev = [
   # under `src/lst` imports it and an instance never needs it.
   "rioxarray",
 ]
+# The docs site under `docs/` and every notebook in it. An instance never
+# installs this group, and neither does the default `uv sync`:
+#
+#     uv sync --group docs
+#     uv run --group docs quarto preview docs
+#
+# Quarto itself comes from `quarto-cli`, so the lockfile pins the renderer the
+# same way it pins every library a notebook imports. A contributed notebook
+# that needs a new package adds it here, in the same pull request.
+docs = [
+  "quarto-cli>=1.11",
+  # Quarto's Jupyter engine. It starts a kernel, runs the cells, and reads
+  # the outputs back through these four.
+  "ipykernel>=7",
+  "jupyter-client",
+  "nbformat",
+  "nbclient",
+  "pyyaml",
+  "rioxarray",
+  "contextily>=1.7",
+  "matplotlib-scalebar>=0.9",
+  "rasterstats>=0.21",
+  "lonboard>=0.17",
+  # The tx35 extract reads the IPCC Atlas NetCDF files once, on a machine
+  # that holds them. The tutorial reads the Parquet file it writes.
+  "h5netcdf>=1.8",
+]
+
+[tool.commitizen]
+# Conventional Commits, checked at commit-msg by the prek hook, and the
+# changelog written in Keep a Changelog headings. `uv` rather than `pep621`
+# because `uv.lock` records the project version too, and `pep621` would leave
+# it behind on every bump.
+name = "cz_conventional_commits"
+version_provider = "uv"
+tag_format = "v$version"
+version_scheme = "pep440"
+major_version_zero = true
+update_changelog_on_bump = true
+changelog_incremental = true
+annotated_tag = true
+change_type_order = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"]
+
+[tool.commitizen.change_type_map]
+feat = "Added"
+fix = "Fixed"
+refactor = "Changed"
+perf = "Changed"
 
 # Imported names against declared dependencies. Two entries, and both are
 # naming gaps rather than suppressions.
@@ -154,6 +206,12 @@ dev = [
 # The package's own name. `src/lst/*` imports `lst.*`, which is first-party and
 # not a missing dependency.
 known_first_party = ["lst"]
+# `docs/` holds the site's plotting helpers and the notebook data scripts.
+# They import the `docs` group (contextily, lonboard, h5netcdf), which deptry
+# reports as DEP004, a dev dependency imported by non-dev code. Nothing an
+# instance runs lives there, and the docs workflow executes every notebook
+# against the locked group, which is the check that matters for those imports.
+extend_exclude = ["docs"]
 
 [tool.deptry.per_rule_ignores]
 # DEP002 is "declared but never imported". deptry found four. Two were real

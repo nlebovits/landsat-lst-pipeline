@@ -1,0 +1,45 @@
+---
+title: Landsat LST P95 composites (2021–2025)
+pagetitle: Landsat LST P95
+toc: false
+code-tools: false
+repo-actions: false
+image: images/thumbnail.png
+filters:
+  - _drop_title.lua
+---
+
+This dataset maps the 95th-percentile Landsat 8 and 9 land surface temperature from 2021 to 2025, at 30 m, for all land between 60° S and 60° N.
+It is a decision support tool for cities that have no other local heat data, and it works best to compare areas within one city.
+It records the temperature of the ground, roofs, and roads, not the heat that people feel, and it does not measure heat risk to people.
+
+![](images/overview.png){fig-alt="World map of 95th-percentile land surface temperature from 2021 to 2025, shaded from dark purple for cooler surfaces to pale yellow for hotter ones."}
+
+{{< include /_readme/intro.md >}}
+
+## Get the data
+
+[Source Cooperative](https://source.coop/nlebovits/landsat-lst) hosts the composites as cloud-optimized GeoTIFFs, in tiles of 5° by 5°.
+Each tile has two files: `lst_p95` holds the temperature in degrees Celsius, and `qa_count` holds the number of valid observations behind each pixel for each calendar month.
+A cloud-optimized GeoTIFF lets you read a small area over HTTP without downloading the whole tile, and the [quickstart](quickstart.qmd) shows how to do that in Python.
+To look at the data before you download it, open the [web map](https://sensable-heat.vercel.app/).
+
+## Podcast episode
+
+{{< video https://www.youtube.com/watch?v=nlRk-m1o8qw title="Fit for Purpose: Building Global Heat Data for Local Planning" >}}
+
+## Cite
+
+If you use the composites, cite the dataset:
+
+> Lebovits, N., & Wesley, E. (2026). *Landsat LST P95 composites (2021–2025)* [Data set]. Source Cooperative. <https://source.coop/nlebovits/landsat-lst>
+
+```bibtex
+@misc{lebovits2026landsat,
+  author    = {Lebovits, Nissim and Wesley, Elizabeth},
+  title     = {Landsat {LST} {P95} composites (2021--2025)},
+  year      = {2026},
+  publisher = {Source Cooperative},
+  url       = {https://source.coop/nlebovits/landsat-lst}
+}
+```

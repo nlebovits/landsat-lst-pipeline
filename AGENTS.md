@@ -113,7 +113,8 @@ uv run ruff check .
 uv run ty check --extra-search-path tests --extra-search-path fleet
 uv run lint-imports --no-logo
 uv run pytest
-vale --minAlertLevel=error README.md FINDINGS.md docs/PROSE.md
+vale --minAlertLevel=error README.md FINDINGS.md CONTRIBUTING.md docs/
+uv run --group docs quarto render docs
 ```
 
 The package keeps three layers separate. `lst.*` holds the run path,
@@ -196,10 +197,10 @@ after `lst.tile_prep` has fitted the seam correction. Read
 ## Prose
 
 `docs/PROSE.md` has the full rules. Before you finish any change that touches
-a Markdown file, run the gate on it:
+a Markdown or Quarto file, run the gate on it:
 
 ```bash
-vale --minAlertLevel=error README.md FINDINGS.md docs/PROSE.md
+vale --minAlertLevel=error README.md FINDINGS.md CONTRIBUTING.md docs/
 ```
 
 Anything it reports blocks the commit and CI. The findings you will hit most:
@@ -220,6 +221,42 @@ Anything it reports blocks the commit and CI. The findings you will hit most:
 Never suppress a finding to make the check pass. If a rule is wrong for this
 domain, disable it in `.vale.ini` with a stated reason and add a test to
 `tests/test_prose_styles.py`, the way the four existing domain disables do.
+
+## The docs site
+
+The site at https://nlebovits.github.io/landsat-lst-pipeline/ is a Quarto
+project in `docs/`. `docs/_quarto.yml` lists what renders, so `docs/PROSE.md`
+and `docs/conformance.md` stay repository documents and never become pages.
+
+- Pages: `index.qmd`, `quickstart.qmd`, `about/`, `tutorials/`, `examples/`,
+  and `contribute/`. The `contribute/` pages include `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`, and `CHANGELOG.md` from the repository root, so edit
+  those files rather than the pages.
+- `docs/_readme/` holds the README sections the About pages include, in the
+  authors' words. Never edit the words in those files: the catalog README is
+  built from the same partials, and Vale skips them on purpose. Change the
+  wording only when the authors ask, in the partial itself.
+- `docs/_headings.lua` fits an included file's headings under the page title.
+  `about/_metadata.yml` and `contribute/_metadata.yml` apply it.
+- Render with `uv sync --group docs` and then
+  `uv run --group docs quarto render docs`. Preview with
+  `uv run --group docs quarto preview docs`.
+- Notebook pages run with `freeze: auto`. After a notebook executes, commit
+  `docs/_freeze/` with it, including `docs/_freeze/site_libs/`. CI renders
+  from the committed freeze and fails when the render changes it.
+- `freeze: auto` watches only a notebook's own source. Its other inputs,
+  `docs/_plotting.py`, `docs/fonts/`, and the files in its own subdirectory,
+  have hashes in `docs/_notebook_inputs.json`. After you execute a notebook
+  because one of them changed, run
+  `python3 .github/scripts/docs_notebooks.py record` and commit the manifest
+  with the freeze. CI fails on a mismatch.
+- `.github/workflows/docs.yml` executes each notebook a pull request touches
+  from an empty freeze, and every notebook when `uv.lock`, the `docs`
+  dependency group, `docs/_plotting.py`, or `docs/fonts/` changes. A cell error fails the
+  job. A weekly run executes them all and opens one issue on failure. Pushes
+  to `main` deploy `docs/_site/` to GitHub Pages.
+- A notebook that needs a new package adds it to the `docs` group in the same
+  pull request. `docs/contribute/notebooks.qmd` is the contributor guide.
 
 ## Working habits
 

@@ -1,0 +1,7 @@
+---
+title: Provenance and license
+---
+
+{{< include /_readme/provenance.md >}}
+
+{{< include /_readme/license.md >}}

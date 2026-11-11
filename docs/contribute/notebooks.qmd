@@ -1,0 +1,177 @@
+---
+title: Contribute a notebook
+---
+
+The [examples gallery](../examples/index.qmd) collects notebooks that each
+read the composite for one place and set it next to other data for that
+place. You add one through a pull request. The
+[Pergamino tutorial](../tutorials/pergamino.qmd) is the reference example:
+read it before you start, and reuse its structure where it fits.
+
+The guidance on this page describes what makes a notebook easy to review and
+to keep running. None of it is a hard rule. Where your notebook departs from
+it, say why in the notebook itself.
+
+## Choose the data
+
+Prefer sources that publish in cloud-optimized formats, which let a notebook
+read the area of interest without downloading whole files:
+
+- [Cloud-optimized GeoTIFF](https://cogeo.org/) for rasters, such as this
+  dataset's [STAC catalog](https://data.source.coop/nlebovits/landsat-lst/catalog.json).
+- [GeoParquet](https://geoparquet.org/) for vector data, such as
+  [Overture Maps buildings](https://docs.overturemaps.org/guides/buildings/).
+- [PMTiles](https://docs.protomaps.com/pmtiles/) for map tiles.
+- [Zarr](https://zarr.dev/) for multidimensional arrays.
+- [STAC](https://stacspec.org/) catalogs that index any of these formats.
+
+[Source Cooperative](https://source.coop/) hosts several datasets that pair
+well with surface temperature, such as the
+[Global Human Settlement Layer](https://source.coop/nlebovits/ghsl) and the
+[Meta and WRI canopy height map](https://source.coop/tge-labs/meta-chm-v2).
+The [intended use](../about/intended-use.qmd) page lists more ancillary data.
+
+If the data you need comes only as a Shapefile or a zipped download, you can
+still use it. Explain the exception in
+a sentence near the cell that reads it.
+
+## Limit the run time
+
+CI executes every notebook on a standard GitHub-hosted runner. Aim for about
+10 minutes of run time, and treat 25 minutes as the limit, because the job
+times out there.
+
+- Read only the area of interest. Pass a bounding box or a window to every
+  read, and never load a whole 5-degree tile when you need one city.
+- Choose one city or region, not a country.
+- Cache nothing outside the repository. A notebook that depends on a file in
+  your home directory fails in CI.
+
+## Lay out the folder
+
+Each example has its own folder under `docs/examples/`. Use a short,
+lowercase slug for the folder name, such as the city:
+
+```text
+docs/examples/<slug>/
+├── index.qmd        # the notebook
+└── thumbnail.png    # the gallery image, about 800 x 500 px
+```
+
+Write the notebook as a Quarto document with Python cells rather than as an
+`.ipynb` file. Quarto stores the outputs in `docs/_freeze/`, and
+a reviewer reads plain text.
+
+## Write the front matter
+
+The gallery builds each card from the notebook's front matter. Copy this
+template into the top of `index.qmd` and fill in every field:
+
+```yaml
+---
+title: "Surface heat and tree canopy in <place>"
+author: "<Your name>"
+date: "<YYYY-MM-DD>"
+description: >-
+  One or two sentences on the question the notebook answers, and for which
+  place.
+categories:
+  - <Place, Country>
+  - Landsat LST P95
+  - <Each other dataset the notebook reads>
+image: thumbnail.png
+---
+```
+
+Use the place and every dataset as categories. Readers filter the gallery by
+them, and a dataset name that matches an existing card groups the two.
+
+## Write the notebook
+
+- Start with the question the notebook answers and the place it covers.
+  Follow it with the data, the analysis, and what the result means for a
+  planning decision.
+- The site folds code by default. Each cell shows its output and hides its
+  source behind a toggle. Write the prose around the cells so a reader can
+  follow the notebook without opening them.
+- Reuse the plotting helpers in `docs/_plotting.py` to give your figures the
+  same look as the rest of the site. Quarto runs each notebook from its own
+  folder. Put `docs/` on the import path from there:
+
+  ```python
+  import sys
+  from pathlib import Path
+
+  sys.path.insert(0, str(Path.cwd().parents[1]))
+  import _plotting
+  ```
+
+- State units and the decode rule where you convert the composite's integer
+  values to degrees Celsius.
+- Keep the prose clean for [Vale](https://vale.sh/). The repository's
+  [prose rules](https://github.com/nlebovits/landsat-lst-pipeline/blob/main/docs/PROSE.md)
+  apply to notebooks, and CI checks them at error level.
+
+If the notebook needs a Python package that the project does not declare yet,
+add it to the `docs` dependency group in the same pull request:
+
+```bash
+uv add --group docs <package>
+```
+
+## Render and commit
+
+Run these commands from the repository root to execute your notebook and then
+render the whole site the way CI does:
+
+```bash
+uv sync --group docs
+uv run --group docs quarto render \
+  docs/examples/<slug>/index.qmd --execute
+uv run --group docs quarto render docs
+```
+
+Preview the result while you edit:
+
+```bash
+uv run --group docs quarto preview docs
+```
+
+Then check the prose:
+
+```bash
+vale --minAlertLevel=error \
+  docs/examples/<slug>/index.qmd
+```
+
+Rendering writes the notebook's outputs to `docs/_freeze/examples/<slug>/`.
+Commit that directory with the notebook. The docs workflow renders the site
+from the committed freeze. If a notebook's source no longer matches its
+freeze, the render executes the notebook again, and the workflow fails because
+`docs/_freeze/` changed.
+
+Quarto compares only the notebook's own source with its freeze. A notebook
+also reads `docs/_plotting.py`, the fonts in `docs/fonts/`, and the other
+files in its own directory, such as a data file. The file
+`docs/_notebook_inputs.json` records a hash of those inputs for each
+notebook, and the docs workflow fails when one no longer matches. After you
+change an input, execute the notebook again and update the record:
+
+```bash
+uv run --group docs quarto render \
+  docs/examples/<slug>/index.qmd --execute
+python3 .github/scripts/docs_notebooks.py record
+```
+
+Commit the refreshed freeze and `docs/_notebook_inputs.json` together.
+
+## Open the pull request
+
+Open a pull request against `main`, and fill in the template's fields for the
+data sources, the run time on your machine, and the refreshed freeze. When a pull request changes a notebook, CI executes that
+notebook from a clean freeze, and a cell that raises an error fails the
+check. After the merge, a weekly run executes every notebook again and opens
+an issue if one of them breaks.
+
+To discuss an idea before you write it, open a
+[notebook proposal](https://github.com/nlebovits/landsat-lst-pipeline/issues/new?template=notebook-proposal.yml).

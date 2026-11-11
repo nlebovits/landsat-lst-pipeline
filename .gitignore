@@ -84,3 +84,11 @@ artifacts/land_buffered.gpkg
 # `artifacts/land_strict_sha256.txt` and `artifacts/land_strict_slice.gpkg` are
 # committed and this file is not.
 artifacts/land_strict.gpkg
+
+# The docs site's build output and Quarto's scratch files. `quarto render`
+# rebuilds `docs/_site/` and CI publishes it, so none of it belongs in the
+# repository. `docs/_freeze/` is the exception and stays tracked: it holds
+# the executed notebook outputs that a render without a kernel reuses.
+docs/_site/
+docs/.quarto/
+**/*.quarto_ipynb

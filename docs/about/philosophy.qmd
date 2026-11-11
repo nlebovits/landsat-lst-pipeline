@@ -1,0 +1,9 @@
+---
+title: Philosophy
+---
+
+{{< include /_readme/philosophy.md >}}
+
+## Further listening
+
+{{< video https://www.youtube.com/watch?v=nlRk-m1o8qw title="Fit for Purpose: Building Global Heat Data for Local Planning" >}}

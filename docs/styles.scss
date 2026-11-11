@@ -1,0 +1,529 @@
+// The site's one theme, light. _brand.yml sets the fonts and the semantic
+// colors; this file sets the rest. Square corners and hairlines follow the
+// web map, and the magma ramp is the one accent that repeats.
+//
+// Six colors cover the site: ink and paper, mute for secondary text, line
+// and line-strong for rules, surface behind code, and the magma accent for
+// links and the current page. lst-code.theme colors code with the same set.
+//
+// One type scale covers the site, on a 17px root:
+//   36px  h1                   (2.125rem)
+//   24px  h2                   (1.4rem)
+//   20px  h3, subtitle         (1.175rem)
+//   17px  body, h4             (1rem)
+//   15px  navigation: sidebar, table of contents, previous and next
+//   14px  page furniture: footer, page actions, title metadata, code menu
+
+/*-- scss:defaults --*/
+$lst-ink: #0c0e11;
+$lst-paper: #fafaf9;
+$lst-mute: #5e5e5a;
+$lst-line: #dcdcd8;
+$lst-line-strong: #b8b8b2;
+$lst-surface: #f0f0ed;
+$lst-accent: #a52f6c;
+
+$border-radius: 0;
+$border-radius-sm: 0;
+$border-radius-lg: 0;
+$btn-border-radius: 0;
+$btn-border-radius-lg: 0;
+$btn-border-radius-sm: 0;
+$card-border-radius: 0;
+
+$font-size-root: 17px;
+$h1-font-size: 2.125rem;
+$h2-font-size: 1.4rem;
+$h3-font-size: 1.175rem;
+$h4-font-size: 1rem;
+$headings-margin-bottom: 0.6rem;
+$toc-font-size: 0.875rem;
+
+$border-color: $lst-line;
+$text-muted: $lst-mute;
+$body-secondary-color: $lst-mute;
+$sidebar-bg: $lst-paper;
+$sidebar-fg: $lst-ink;
+$footer-bg: $lst-paper;
+$footer-fg: $lst-mute;
+$code-color: $lst-ink;
+$code-bg: $lst-surface;
+$code-block-bg: $lst-surface;
+$blockquote-footer-color: $lst-mute;
+
+/*-- scss:rules --*/
+
+:root {
+  --lst-ink: #{$lst-ink};
+  --lst-mute: #{$lst-mute};
+  --lst-line: #{$lst-line};
+  --lst-line-strong: #{$lst-line-strong};
+  --lst-surface: #{$lst-surface};
+  --lst-accent: #{$lst-accent};
+  --lst-nav-size: 0.875rem;
+  --lst-small-size: 0.825rem;
+}
+
+// The magma ramp, sampled at the same stops as the palette in _brand.yml.
+$lst-magma: linear-gradient(
+  90deg,
+  #000004 0%,
+  #3b0f70 18%,
+  #8c2981 36%,
+  #de4968 58%,
+  #fe9f6d 80%,
+  #fcfdbf 100%
+);
+
+body {
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+// One stripe of the ramp across the top of every page.
+#quarto-header {
+  border-top: 3px solid transparent;
+  border-image: $lst-magma 1;
+}
+
+// -------------------------------------------------------------------------
+// Sidebar
+// -------------------------------------------------------------------------
+
+.sidebar.sidebar-navigation:not(.rollup) {
+  border-right: 1px solid var(--lst-line) !important;
+}
+
+.sidebar-title {
+  margin-top: 0.4rem;
+  padding-bottom: 0;
+  font-size: 1.175rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-title > a {
+  color: var(--lst-ink);
+  font-weight: inherit;
+}
+
+#quarto-sidebar .sidebar-search {
+  margin-top: 1.1rem;
+}
+
+.sidebar-menu-container > ul {
+  margin-top: 1.1rem !important;
+}
+
+// Below 992px Quarto hides the sidebar search, which leaves the gap above
+// the first link empty. Search moves to the top bar there.
+@media (max-width: 991.98px) {
+  .sidebar-menu-container > ul {
+    margin-top: 0 !important;
+  }
+}
+
+// Every sidebar row is the same size, and rows sit 1.75rem apart.
+.sidebar-navigation .sidebar-item,
+.sidebar-navigation .sidebar-section .sidebar-item,
+.sidebar-navigation .sidebar-item a {
+  font-size: var(--lst-nav-size);
+}
+
+.sidebar-navigation .sidebar-item {
+  margin: 0;
+  line-height: 1.3;
+}
+
+.sidebar-navigation .sidebar-item-container {
+  padding: 0.2rem 0;
+}
+
+.sidebar-navigation .sidebar-item-container .sidebar-link {
+  padding-right: 0.25rem;
+}
+
+// Quarto derives the current-page color by darkening the primary color.
+// The site uses the accent itself, the same color as every link.
+div.sidebar-item-container .active {
+  font-weight: 500;
+  color: var(--lst-accent);
+}
+
+div.sidebar-item-container:hover,
+div.sidebar-item-container:focus {
+  color: var(--lst-accent);
+}
+
+// A section heading names a group. The group's pages sit under it, inset
+// and joined by a rule.
+.sidebar-item-section > .sidebar-item-container {
+  margin-top: 0.75rem;
+  font-weight: 600;
+}
+
+.sidebar-navigation .sidebar-section.depth1 {
+  margin: 0.15rem 0 0 0.1rem;
+  padding: 0 0 0 0.8rem;
+  border-left: 1px solid var(--lst-line);
+}
+
+.sidebar-item .sidebar-item-toggle .bi {
+  color: var(--lst-mute);
+}
+
+.sidebar-navigation .sidebar-divider {
+  margin: 1.4rem 0 0.9rem;
+  border-color: var(--lst-line);
+  opacity: 1;
+}
+
+// Links that leave the site end in an arrow, so they read as links out
+// before anyone hovers. _external-links.html adds the class and a tooltip
+// with the destination. The arrow is the Bootstrap Icons glyph
+// arrow-up-right, hidden from screen readers by the empty alternative text.
+.sidebar-navigation a.lst-external .menu-text {
+  text-decoration: underline;
+  text-decoration-color: var(--lst-line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.sidebar-navigation a.lst-external:hover .menu-text,
+.sidebar-navigation a.lst-external:focus-visible .menu-text {
+  text-decoration-color: currentColor;
+}
+
+.sidebar-navigation a.lst-external .menu-text::after {
+  display: inline-block;
+  margin-left: 0.3em;
+  font-family: bootstrap-icons;
+  font-size: 0.75em;
+  line-height: 1;
+  vertical-align: 0.05em;
+  color: var(--lst-mute);
+  content: "\f144" / "";
+}
+
+.sidebar-navigation a.lst-external:hover .menu-text::after {
+  color: var(--lst-accent);
+}
+
+.tippy-box[data-theme~="lst-destination"] {
+  padding: 0;
+  border-color: var(--lst-line-strong);
+  font-size: var(--lst-small-size);
+  color: var(--lst-mute);
+}
+
+.tippy-box[data-theme~="lst-destination"] .tippy-content {
+  padding: 0.3rem 0.55rem;
+}
+
+// On a phone the page title moves into the top bar. Keep it to the bar's
+// height instead of three lines of h1, centered on the two buttons.
+.quarto-secondary-nav > .container-fluid {
+  align-items: center;
+  min-height: 3rem;
+  padding-block: 0.35rem;
+}
+
+.quarto-secondary-nav .quarto-secondary-nav-title {
+  margin: 0;
+  padding: 0;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+// -------------------------------------------------------------------------
+// Table of contents and page furniture
+// -------------------------------------------------------------------------
+
+#TOC h2,
+#TOC .h2 {
+  font-size: var(--lst-nav-size);
+  font-weight: 600;
+  color: var(--lst-ink);
+}
+
+#TOC .nav-link {
+  color: var(--lst-mute);
+}
+
+#TOC .nav-link.active,
+#TOC .nav-link:hover {
+  color: var(--lst-accent);
+}
+
+.sidebar .toc-actions > ul,
+.sidebar .toc-actions ul li a {
+  font-size: var(--lst-small-size);
+  color: var(--lst-mute);
+}
+
+.sidebar .toc-actions {
+  margin-top: 1.25rem;
+}
+
+.nav-page a {
+  color: var(--lst-mute);
+}
+
+.nav-page a:hover {
+  color: var(--lst-accent);
+}
+
+.nav-page .nav-page-text {
+  font-size: var(--lst-nav-size);
+}
+
+.nav-footer {
+  border-top: 1px solid var(--lst-line);
+  font-size: var(--lst-small-size);
+  color: var(--lst-mute);
+}
+
+.nav-footer .nav-footer-left,
+.nav-footer .nav-footer-center,
+.nav-footer .nav-footer-right {
+  font-size: var(--lst-small-size);
+}
+
+.nav-footer a {
+  color: var(--lst-mute);
+  text-underline-offset: 0.18em;
+}
+
+.nav-footer a:hover {
+  color: var(--lst-accent);
+}
+
+.code-tools-button {
+  font-size: var(--lst-small-size);
+  color: var(--lst-mute);
+}
+
+// -------------------------------------------------------------------------
+// Title block
+// -------------------------------------------------------------------------
+
+// With a sidebar, Quarto sets the title block's bottom margin to zero. A
+// title block that lists authors and a date ends at the date, and the first
+// paragraph needs a gap below it.
+body.nav-sidebar #title-block-header:has(.quarto-title-meta-heading) {
+  margin-block-end: 1.75rem;
+}
+
+.quarto-title .subtitle {
+  margin-top: 0.5rem;
+  font-size: $h3-font-size;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--lst-mute);
+}
+
+// Quarto sets the metadata labels in small capitals at 80% opacity. Here
+// they match the other page furniture: sentence case, mute, 14px.
+#title-block-header.quarto-title-block.default .quarto-title-meta-heading {
+  text-transform: none;
+  opacity: 1;
+  font-size: var(--lst-small-size);
+  color: var(--lst-mute);
+}
+
+#title-block-header.quarto-title-block.default .quarto-title-meta-contents {
+  font-size: 1rem;
+}
+
+// -------------------------------------------------------------------------
+// Body text
+// -------------------------------------------------------------------------
+
+// A heading that wraps splits into lines of even length, not one long line
+// and an orphan such as "2025)".
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+
+h2 {
+  margin-top: 2.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--lst-line);
+}
+
+h3 {
+  margin-top: 2rem;
+}
+
+main a:not(.btn):not(.nav-link) {
+  overflow-wrap: anywhere;
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+
+main a:not(.btn):not(.nav-link):hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--lst-accent);
+  outline-offset: 2px;
+}
+
+// A figure that stands on its own gets room above and below it. An image
+// with no caption renders as a paragraph that holds only the image; inside a
+// captioned figure the same paragraph sits against its caption.
+main .quarto-figure,
+main .quarto-video,
+#quarto-document-content > p:has(> img:only-child),
+#quarto-document-content section > p:has(> img:only-child) {
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+}
+
+.figure-caption,
+figcaption {
+  font-size: var(--lst-nav-size);
+  color: var(--lst-mute);
+}
+
+// Every image scales down to its column. Quarto's retina figures carry a
+// fixed width attribute and no img-fluid class, so they need this rule.
+main img {
+  max-width: 100%;
+  height: auto;
+}
+
+// A quoted passage, such as the citation on the homepage, is text to copy.
+// It keeps the body color and size, set off by a rule.
+main blockquote,
+main .blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.1rem;
+  border-left: 3px solid var(--lst-line-strong);
+  font-size: 1rem;
+  color: var(--lst-ink);
+}
+
+main blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+code {
+  font-size: 0.88em;
+}
+
+:not(pre) > code:not(.sourceCode) {
+  padding: 0.08em 0.3em;
+  background: var(--lst-surface);
+  color: var(--lst-ink);
+}
+
+div.sourceCode,
+pre.sourceCode {
+  border: 1px solid var(--lst-line);
+  background: var(--lst-surface);
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+.table > :not(caption) > * > * {
+  padding: 0.45rem 0.6rem;
+}
+
+// A table wider than a phone scrolls inside its own box instead of
+// widening the page.
+@media (max-width: 575.98px) {
+  main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+.callout {
+  border-radius: 0;
+}
+
+.btn {
+  font-weight: 500;
+  padding: 0.6rem 1.1rem;
+  text-decoration: none;
+}
+
+.btn-primary {
+  color: #ffffff;
+}
+
+.btn-outline {
+  border: 1px solid var(--lst-line-strong);
+  color: var(--lst-ink);
+  background: transparent;
+}
+
+.btn-outline:hover,
+.btn-outline:focus-visible {
+  border-color: var(--lst-ink);
+  color: var(--lst-ink);
+  background: var(--lst-surface);
+}
+
+// -------------------------------------------------------------------------
+// Examples gallery
+// -------------------------------------------------------------------------
+
+.lst-empty {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border: 1px dashed var(--lst-line-strong);
+}
+
+.lst-empty h2 {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  font-size: $h3-font-size;
+}
+
+.lst-empty p:last-child {
+  margin-bottom: 0;
+}
+
+// The empty-state block stays hidden once the listing holds an item.
+.quarto-listing:has(.quarto-grid-item) ~ .lst-empty,
+#listing-examples:has(.quarto-grid-item) ~ .lst-empty {
+  display: none;
+}
+
+// With no items, the filter box has nothing to filter.
+.quarto-listing:not(:has(.quarto-grid-item)) .listing-actions-group {
+  display: none;
+}
+
+.quarto-grid-item.card {
+  border: 1px solid var(--lst-line);
+  box-shadow: none;
+}
+
+.quarto-grid-item.card:hover {
+  border-color: var(--lst-line-strong);
+}
+
+.quarto-grid-item .listing-categories .listing-category {
+  border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

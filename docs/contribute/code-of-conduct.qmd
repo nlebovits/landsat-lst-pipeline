@@ -1,0 +1,6 @@
+---
+title: Code of conduct
+toc: false
+---
+
+{{< include ../../CODE_OF_CONDUCT.md >}}

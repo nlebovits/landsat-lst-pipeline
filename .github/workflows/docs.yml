@@ -1,0 +1,194 @@
+# The docs site under docs/: execute the notebooks a change touches, render
+# the site from the committed freeze, and publish it to GitHub Pages from main.
+#
+#   detect     Pull requests, the weekly run, and manual runs. Picks the
+#              notebooks to execute: on a pull request, the ones it changed,
+#              or all of them when it changed what every notebook runs on; on
+#              the weekly and manual runs, all of them.
+#   notebooks  Executes each picked notebook from an empty freeze. A cell that
+#              raises fails the job, because Quarto's default `error: false`
+#              stops the render at the first cell error.
+#   render     Fails first when a notebook's inputs outside its source, such
+#              as docs/_plotting.py or its data, differ from the hashes in
+#              docs/_notebook_inputs.json. Then renders the whole site with
+#              `freeze: auto`. A notebook whose source no longer matches its
+#              committed freeze executes again here, and the job fails
+#              because `docs/_freeze/` changed.
+#   report     The weekly run only. Opens or updates one issue when a
+#              notebook fails.
+#   deploy     Pushes to main only. Publishes `docs/_site/` to GitHub Pages.
+name: Docs
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays at 06:00 UTC. Upstream data and packages drift between
+    # pull requests, and this run notices before a reader does.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A newer push to a pull request makes the older run moot. A run on main
+  # finishes, so a deployment is never cut off halfway.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  detect:
+    name: Pick notebooks
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      any: ${{ steps.pick.outputs.any }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      # .github/scripts/docs_notebooks.py defines a notebook and its inputs.
+      # uv.lock, the `docs` dependency group, docs/_plotting.py, and
+      # docs/fonts/ select every notebook. A changed file in a notebook's own
+      # subdirectory, such as its data, selects that notebook.
+      - name: Pick the notebooks to execute
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+        run: python3 .github/scripts/docs_notebooks.py pick --event "$EVENT"
+
+  notebooks:
+    name: Execute ${{ matrix.notebook }}
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install the docs environment
+        run: uv sync --group docs --frozen
+
+      # Execute from nothing. With the freeze in place, Quarto could reuse a
+      # stored output and never run the cell that broke.
+      - name: Remove the notebook's freeze
+        env:
+          NOTEBOOK: ${{ matrix.notebook }}
+        run: |
+          relative="${NOTEBOOK#docs/}"
+          rm -rf -- "docs/_freeze/${relative%.qmd}"
+
+      - name: Execute and render
+        env:
+          NOTEBOOK: ${{ matrix.notebook }}
+        run: uv run --group docs quarto render "$NOTEBOOK" --execute
+
+  render:
+    name: Render the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install the docs environment
+        run: uv sync --group docs --frozen
+
+      # `freeze: auto` watches only each notebook's own source. This step
+      # compares the inputs outside it, such as docs/_plotting.py and a
+      # tutorial's data, with the hashes in docs/_notebook_inputs.json.
+      - name: Check that each notebook's inputs match its freeze
+        run: python3 .github/scripts/docs_notebooks.py check
+
+      - name: Render
+        run: uv run --group docs quarto render docs
+
+      - name: Check that the committed freeze is current
+        run: |
+          stale="$(git status --porcelain -- docs/_freeze)"
+          if [ -n "$stale" ]; then
+            printf '%s\n' "$stale"
+            echo "::error::docs/_freeze/ is out of date. Run" \
+              "'uv run --group docs quarto render docs' and commit" \
+              "the refreshed docs/_freeze/ directory with your change."
+            exit 1
+          fi
+
+      - name: Upload the site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/_site
+
+  report:
+    name: Report a failed weekly run
+    needs: notebooks
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Weekly notebook run failed"
+          # The backticks are jq string content that formats each name as
+          # code in the issue body, not a command substitution.
+          # shellcheck disable=SC2016
+          failed="$(gh run view "$RUN_ID" --json jobs \
+            --jq '.jobs[] | select(.conclusion == "failure")
+                  | select(.name | startswith("Execute ")) | .name
+                  | sub("^Execute "; "- `") + "`"')"
+          body="$(printf 'The weekly notebook run on %s failed.\n\nRun: %s\n\nFailing notebooks:\n%s\n' \
+            "$(date -u +%Y-%m-%d)" "$RUN_URL" "${failed:-- (see the run log)}")"
+          number="$(gh issue list --state open --search "\"$title\" in:title" \
+            --json number,title --jq ".[] | select(.title == \"$title\") | .number" \
+            | head -n 1)"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: render
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

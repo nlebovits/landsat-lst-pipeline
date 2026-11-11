@@ -1,0 +1,153 @@
+---
+title: "Quickstart"
+code-fold: false
+---
+
+Each 5° tile of the composite is an item in a
+[Portolan catalog](https://data.source.coop/nlebovits/landsat-lst/catalog.json)
+that [Source Cooperative](https://source.coop/nlebovits/landsat-lst) hosts. To
+look at the data before you write code, open the
+[web map](https://sensable-heat.vercel.app/).
+
+### Before you begin
+
+Install [pystac](https://pystac.readthedocs.io/),
+[rasterio](https://rasterio.readthedocs.io/), [NumPy](https://numpy.org/), and
+[Matplotlib](https://matplotlib.org/):
+
+```bash
+python -m pip install pystac rasterio numpy matplotlib
+```
+
+The examples read public files over HTTPS. You need no account and no
+credentials.
+
+{{< include /_readme/storage-and-access.md >}}
+
+```{python}
+#| include: false
+# Apply the site's figure style. A reader who copies the code below gets
+# Matplotlib's defaults instead, and the same figure.
+import sys
+from pathlib import Path
+
+DOCS_DIR = next(
+    p
+    for p in [Path.cwd(), *Path.cwd().parents, Path.cwd() / "docs"]
+    if (p / "_plotting.py").exists()
+)
+sys.path.insert(0, str(DOCS_DIR))
+import _plotting  # noqa: E402
+
+_plotting.apply_style()
+```
+
+### Plot an area of interest
+
+Set the area of interest as a bounding box in degrees of longitude and
+latitude. This example uses the city of Córdoba, Argentina.
+
+A tile takes its name from its north and west edges. `tile_for` applies that
+rule to find the tile that contains a point. The code reads one tile, and it
+stops if the area crosses a tile edge.
+
+```{python}
+#| label: fig-quickstart
+#| fig-cap: "95th-percentile land surface temperature for 2021–2025 in Córdoba, Argentina."
+#| fig-alt: "Map of Córdoba in a dark purple to pale yellow color scale. The city inside its ring road appears in mid purples with scattered bright spots. Bare fields at the edges of the area appear pale yellow, the hottest surfaces in the map. A river valley and wooded land in the northwest appear dark and cool."
+import math
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pystac
+import rasterio
+from rasterio.windows import bounds, from_bounds
+
+# West, south, east, north, in degrees.
+AREA = (-64.32, -31.50, -64.08, -31.32)
+
+
+def tile_for(lon, lat):
+    """Return the ID of the 5-degree tile that holds a point."""
+    north = math.ceil(lat / 5) * 5
+    west = math.floor(lon / 5) * 5
+    ns = "N" if north >= 0 else "S"
+    ew = "E" if west >= 0 else "W"
+    return f"{ns}{abs(north):02d}{ew}{abs(west):03d}"
+
+
+tile = tile_for(AREA[0], AREA[3])
+assert tile_for(AREA[2], AREA[1]) == tile, "The area crosses a tile edge."
+
+item = pystac.Item.from_file(
+    "https://data.source.coop/nlebovits/landsat-lst/"
+    f"lst-p95-2021-2025/{tile}/{tile}.json"
+)
+
+with rasterio.open(item.assets["lst_p95"].get_absolute_href()) as src:
+    window = from_bounds(*AREA, src.transform)
+    lst = src.read(1, window=window, masked=True)
+    lst_celsius = lst * src.scales[0] + src.offsets[0]
+    west, south, east, north = bounds(window, src.transform)
+
+# Stretch the colors from the 2nd to the 98th percentile. A few very hot
+# roofs would otherwise wash out the rest of the city.
+low, high = np.percentile(lst_celsius.compressed(), [2, 98])
+
+fig, ax = plt.subplots(figsize=(8, 6))
+image = ax.imshow(
+    lst_celsius,
+    cmap="magma",
+    vmin=low,
+    vmax=high,
+    extent=(west, east, south, north),
+)
+# A degree of longitude is shorter than a degree of latitude away from the
+# equator. This aspect ratio keeps the map's shape true.
+ax.set_aspect(1 / math.cos(math.radians((south + north) / 2)))
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+fig.colorbar(image, ax=ax, label="°C")
+plt.show()
+```
+
+### Summarize the area
+
+`lst_celsius` is a NumPy
+[masked array](https://numpy.org/doc/stable/reference/maskedarray.html) that
+masks the pixels the COG marks as nodata. `compressed()` drops them.
+
+```{python}
+values = lst_celsius.compressed()
+print(f"Pixels with a value: {values.size:,} of {lst_celsius.size:,}")
+
+statistics = {
+    "Minimum": values.min(),
+    "10th percentile": np.percentile(values, 10),
+    "Median": np.median(values),
+    "Mean": values.mean(),
+    "90th percentile": np.percentile(values, 90),
+    "Maximum": values.max(),
+}
+for name, value in statistics.items():
+    print(f"{name:>16}: {value:5.1f} °C")
+```
+
+Use these values to compare areas within one city. A pixel's value is not the
+unmodified 95th percentile of observed temperature, as the
+[methods](/about/methods.qmd) page explains.
+
+### Next steps
+
+- Follow the [Pergamino tutorial](/tutorials/pergamino.qmd). It combines the
+  composite with tree canopy and building data for one city.
+- Read the [methods](/about/methods.qmd) to learn how scene normalization and
+  feathering change the values.
+- Check the [intended use](/about/intended-use.qmd) before you base a decision
+  on the data.
+- Read the [philosophy](/about/philosophy.qmd) behind a fit-for-purpose
+  dataset.
+- List every tile from the
+  [item mirror](https://data.source.coop/nlebovits/landsat-lst/lst-p95-2021-2025/items.parquet),
+  or browse the
+  [STAC collection](https://data.source.coop/nlebovits/landsat-lst/lst-p95-2021-2025/collection.json).
